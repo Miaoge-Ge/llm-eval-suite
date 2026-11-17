@@ -10,6 +10,7 @@ const state = {
   busy: false,
   snapshots: new Map(),
   historyRead: 0,
+  sessionVersion: 0,
 };
 const names = {
   QUEUED: "排队中",
@@ -47,6 +48,7 @@ function element(tag, text, className = "") {
   return el;
 }
 function showLogin() {
+  state.sessionVersion++;
   $("workspace").hidden = true;
   $("login-view").hidden = false;
   $("api-key").value = "";
@@ -303,25 +305,31 @@ function renderJob(job) {
   }
 }
 async function loadJob(id) {
+  const version = state.sessionVersion;
   try {
     const cached = state.snapshots.get(id);
     const response = await api(`/jobs/${id}`, {
       headers: cached ? { "If-None-Match": cached.etag } : {},
     });
     const job = response.status === 304 ? cached.job : await response.json();
+    if (version !== state.sessionVersion) return;
     if (response.status !== 304)
       state.snapshots.set(id, { etag: response.headers.get("ETag"), job });
     if (state.selected === id) renderJob(job);
   } catch (error) {
-    $("job-error").textContent = error.message;
+    if (version === state.sessionVersion)
+      $("job-error").textContent = error.message;
   }
 }
 async function refresh(force = false) {
+  const version = state.sessionVersion;
   clearTimeout(state.timer);
   if ($("workspace").hidden) return;
   try {
     if (force || performance.now() - state.historyRead > 10000) {
-      state.jobs = await (await api("/jobs")).json();
+      const jobs = await (await api("/jobs")).json();
+      if (version !== state.sessionVersion) return;
+      state.jobs = jobs;
       state.historyRead = performance.now();
       renderHistory();
     }
@@ -331,16 +339,20 @@ async function refresh(force = false) {
       await loadJob(state.selected);
     }
   } catch (error) {
-    if (!$("workspace").hidden)
+    if (version === state.sessionVersion && !$("workspace").hidden)
       $("form-error").textContent = `连接暂时中断：${error.message}`;
   }
-  if (!$("workspace").hidden)
+  if (version === state.sessionVersion && !$("workspace").hidden)
     state.timer = setTimeout(
       () => refresh(),
       state.jobs.some((job) => running.has(job.status)) ? 2000 : 15000,
     );
 }
 async function initialize() {
+  state.sessionVersion++;
+  clearTimeout(state.timer);
+  $("report-dialog").close();
+  $("report-content").textContent = "";
   await api("/session", { method: "POST" });
   state.jobs = [];
   state.selected = null;
@@ -396,6 +408,7 @@ $("login-form").addEventListener("submit", async (event) => {
   }
 });
 $("evaluation-form").addEventListener("submit", async (event) => {
+  const version = state.sessionVersion;
   event.preventDefault();
   if (state.busy) return;
   state.busy = true;
@@ -421,6 +434,7 @@ $("evaluation-form").addEventListener("submit", async (event) => {
     const job = await (
       await api("/jobs", { method: "POST", body: JSON.stringify(payload) })
     ).json();
+    if (version !== state.sessionVersion) return;
     state.selected = job.id;
     $("api-key").value = "";
     await refresh(true);
@@ -441,10 +455,11 @@ $("cancel-button").addEventListener("click", async () => {
   }
 });
 $("show-report").addEventListener("click", async () => {
+  const version = state.sessionVersion;
   try {
-    $("report-content").textContent = await (
-      await api(`/jobs/${state.selected}/report`)
-    ).text();
+    const content = await (await api(`/jobs/${state.selected}/report`)).text();
+    if (version !== state.sessionVersion) return;
+    $("report-content").textContent = content;
     $("report-dialog").showModal();
   } catch (error) {
     $("job-error").textContent = error.message;

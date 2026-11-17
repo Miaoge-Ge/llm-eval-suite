@@ -149,9 +149,12 @@ Json GraderPool::call(const Json& request) {
         condition_.wait(lock, [this] { return !available_.empty(); });
         index = available_.front(); available_.pop_front();
     }
-    ActivityGuard guard(activity_);
     try {
-        Json result = workers_[index]->call(request);
+        Json result;
+        {
+            ActivityGuard guard(activity_);
+            result = workers_[index]->call(request);
+        }
         { std::lock_guard lock(mutex_); available_.push_back(index); }
         condition_.notify_one();
         return result;

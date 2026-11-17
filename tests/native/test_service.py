@@ -206,6 +206,32 @@ def test_restored_guest_ownership_and_interrupted_restart(service):
             assert forbidden not in environment
 
 
+def test_one_hundred_connections_do_not_pin_idle_http_workers(service):
+    from concurrent.futures import ThreadPoolExecutor
+    from http.client import HTTPConnection
+    from urllib.parse import urlsplit
+
+    base, _, _, _ = service
+    target = urlsplit(base)
+    barrier = threading.Barrier(100)
+
+    def visit(_):
+        connection = HTTPConnection(target.hostname, target.port, timeout=8)
+        try:
+            connection.connect()
+            barrier.wait(timeout=8)
+            connection.request("GET", "/api/health")
+            response = connection.getresponse()
+            assert response.status == 200
+            assert json.loads(response.read())["runtime"] == "cpp"
+            barrier.wait(timeout=8)
+        finally:
+            connection.close()
+
+    with ThreadPoolExecutor(max_workers=100) as pool:
+        list(pool.map(visit, range(100)))
+
+
 def test_thirty_failures_are_not_hidden_by_retries(service, provider):
     _, admin, state, _ = service
     url, mock = provider
@@ -267,6 +293,19 @@ def test_benchmark_retry_keeps_both_attempts(service, provider):
     row = wait_job(admin, response.json()["id"])
     assert row["status"] == "COMPLETED", row
     assert row["summary"]["api_attempts"] == mock.count == 2
+
+
+def test_parallel_jobs_observe_global_request_and_grader_limits(service, provider):
+    _, admin, _, _ = service
+    url, mock = provider
+    mock.mode = "reference"
+    ids = [submit(admin, url), submit(admin, url)]
+    for identifier in ids:
+        assert wait_job(admin, identifier)["summary"]["api_attempts"] == 30
+    capacity = admin.get("/api/admin/capacity").json()
+    assert mock.count == 60
+    assert capacity["requests"]["peak"] <= 4
+    assert capacity["graders"]["peak"] <= 2
 
 
 @pytest.mark.skipif(

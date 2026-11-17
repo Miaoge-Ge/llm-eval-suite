@@ -113,7 +113,9 @@ void configure_web(httplib::Server& server, Engine& engine, const Config& config
     server.set_payload_max_length(64 * 1024);
     server.set_read_timeout(15);
     server.set_write_timeout(30);
-    server.set_keep_alive_max_count(100);
+    // Caddy owns public keep-alive connections. A blocking backend thread must
+    // return after each response instead of waiting on an idle proxy socket.
+    server.set_keep_alive_max_count(1);
     server.set_pre_routing_handler([](const auto& request, auto& response) {
         if (request.method == "POST" || request.method == "PUT" || request.method == "DELETE" || request.method == "PATCH") {
             const auto origin = request.get_header_value("Origin");

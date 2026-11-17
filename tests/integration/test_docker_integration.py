@@ -63,7 +63,9 @@ def test_docker_isolates_environment_network_and_host_files(engine, tmp_path, mo
     ],
 )
 def test_docker_limits_and_completion(engine, code, status):
-    result = engine.run(code, 2)
+    # Docker Desktop startup can take several seconds. Only the intentional
+    # infinite loop tests a short deadline; other cases isolate their own limit.
+    result = engine.run(code, 2 if status == "TIMEOUT" else 10)
     assert result.status == status, result
 
 
