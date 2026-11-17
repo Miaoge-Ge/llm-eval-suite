@@ -49,6 +49,7 @@ function element(tag, text, className = "") {
 }
 function showLogin() {
   state.sessionVersion++;
+  $("entry-status").hidden = true;
   $("workspace").hidden = true;
   $("login-view").hidden = false;
   $("api-key").value = "";
@@ -384,6 +385,7 @@ async function initialize() {
       "服务器密钥仅用于默认 API 地址；自定义密钥不写入评测记录。";
   }
   $("login-view").hidden = true;
+  $("entry-status").hidden = true;
   $("workspace").hidden = false;
   configureTask();
   setMode(state.mode);
