@@ -39,9 +39,10 @@ def last_numeric_token(text: str) -> str | None:
         time_unit = r"(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)"
         conversion = rf"(?:\s*\((?:{number}\s+{time_unit}\s*)+\))?"
         unit = rf"(?:\s+{time_unit}{conversion}|\s+(?:dollars?|cents?|euros?|pounds?)|\s*%)?"
+        rate_unit = rf"(?:\s+per\s+(?:{time_unit}|cups?|items?|pieces?|persons?|people|students?|tickets?))?"
         # Explicit answer markers may include a currency or a known unit. Do not
         # accept arithmetic, prose alternatives, or numbers buried in reasoning.
-        explicit = re.fullmatch(rf"[$£€]?\s*({number}){unit}[.]?", answer[0].strip(), re.IGNORECASE)
+        explicit = re.fullmatch(rf"[$£€]?\s*({number}){unit}{rate_unit}[.]?", answer[0].strip(), re.IGNORECASE)
         return explicit.group(1).replace(",", "") if explicit else None
     lines = text.strip().splitlines()
     if not lines:

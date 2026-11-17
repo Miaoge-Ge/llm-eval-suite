@@ -196,6 +196,8 @@ def test_gsm_uses_last_answer_marker():
     "answer,expected",
     [
         ("#### $145", "145"),
+        ("#### $145 per cup", "145"),
+        ("#### 12 dollars per item", "12"),
         ("#### 140 minutes", "140"),
         ("#### 160 minutes (2 hours 40 minutes)", "160"),
         ("#### 10 dollars", "10"),
