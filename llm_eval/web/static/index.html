@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#253759" />
+    <title>LLM Eval Suite · 模型评测工作台</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <section id="login-view" class="login-view">
+      <div class="login-brand">
+        <span class="brand-glyph" aria-hidden="true">∿</span
+        ><span>LLM Eval Suite</span>
+      </div>
+      <form id="login-form" class="login-form">
+        <p class="login-note">你的模型评测工作台</p>
+        <h1>开始一次有依据的评测。</h1>
+        <p class="muted">
+          Benchmark 性能与 API 服务质量，在同一个地方测量、比较和复查。
+        </p>
+        <label for="login-password">访问密码</label>
+        <input
+          id="login-password"
+          type="password"
+          autocomplete="current-password"
+          required
+          autofocus
+        />
+        <p id="login-error" class="error-message" role="alert"></p>
+        <button class="primary" type="submit">
+          登录工作台 <span aria-hidden="true">↗</span>
+        </button>
+        <p class="login-foot">仅授权访问。模型密钥不会显示在报告里。</p>
+      </form>
+      <div class="login-art" aria-hidden="true">
+        <div class="wave wave-a"></div>
+        <div class="wave wave-b"></div>
+        <div class="wave wave-c"></div>
+        <span>从答案到证据</span>
+      </div>
+    </section>
+
+    <div id="workspace" class="workspace" hidden>
+      <aside class="sidebar">
+        <a class="brand" href="/"
+          ><span class="brand-glyph" aria-hidden="true">∿</span
+          ><span>LLM Eval<span class="brand-sub">Suite</span></span></a
+        >
+        <nav aria-label="评测功能">
+          <button class="nav-item active" data-mode="benchmark">
+            <span class="nav-icon" aria-hidden="true">▦</span
+            ><span>Benchmark<small>模型能力评测</small></span>
+          </button>
+          <button class="nav-item" data-mode="api">
+            <span class="nav-icon" aria-hidden="true">∿</span
+            ><span>API 测试<small>响应与服务质量</small></span>
+          </button>
+          <button class="nav-item" data-mode="verification">
+            <span class="nav-icon" aria-hidden="true">◇</span
+            ><span>模型验证<small>开发中</small></span>
+          </button>
+        </nav>
+        <div class="sidebar-bottom">
+          <span class="status-dot"></span>独立评测，保留原始记录
+        </div>
+      </aside>
+      <main>
+        <header class="topbar">
+          <span>模型评测工作台</span>
+          <div>
+            <span class="connection"
+              ><span class="status-dot"></span>已连接</span
+            ><button id="logout" class="quiet">退出</button>
+          </div>
+        </header>
+        <div class="page">
+          <header class="page-heading">
+            <div>
+              <p id="section-caption" class="section-caption">模型能力</p>
+              <h1 id="page-title">Benchmark 评测</h1>
+              <p id="page-description">
+                选择题库并运行。完整评分与原始响应会一起保存。
+              </p>
+            </div>
+            <span class="version-label">LLM Eval Suite</span>
+          </header>
+
+          <section id="verification-view" class="verification-view" hidden>
+            <span class="planned">开发中</span>
+            <h2>比较模型，需要可信的参照。</h2>
+            <p>
+              这里将用于对比待测接口与可信模型的行为差异。当前尚未实现验证引擎，也不会生成“真模型”判断。
+            </p>
+            <div class="verification-diagram">
+              <div>
+                <strong>可信参考</strong><span>固定模型与生成参数</span>
+              </div>
+              <span aria-hidden="true">⇄</span>
+              <div><strong>待测接口</strong><span>相同条件下的响应</span></div>
+            </div>
+            <p class="muted">
+              模型名称、自我介绍和单次问答无法证明模型身份。未来结果会提供对比证据及不确定性。
+            </p>
+          </section>
+
+          <div id="evaluation-view">
+            <div class="evaluation-layout">
+              <section
+                class="configuration-panel"
+                aria-labelledby="configuration-title"
+              >
+                <div class="panel-title">
+                  <h2 id="configuration-title">新建评测</h2>
+                  <span>配置</span>
+                </div>
+                <form id="evaluation-form">
+                  <div id="benchmark-fields" class="field-group">
+                    <label for="task">题库</label
+                    ><select id="task"></select>
+                    <p id="suite-help" class="field-help">
+                      四个维度各 10 题，完整保留代码测试。
+                    </p>
+                    <div id="limit-field" hidden>
+                      <label for="limit"
+                        >题量上限 <span class="optional">可选</span></label
+                      ><input
+                        id="limit"
+                        type="number"
+                        min="1"
+                        max="5000"
+                        placeholder="留空运行全部题目"
+                      />
+                    </div>
+                  </div>
+                  <div id="api-suite-note" class="suite-note" hidden>
+                    <strong>30 次独立流式请求</strong>
+                    <p>
+                      短回答、长回答和长上下文各 10 次。失败请求不自动重试。
+                    </p>
+                  </div>
+                  <div class="field-group">
+                    <label for="base-url">API 地址</label
+                    ><input
+                      id="base-url"
+                      type="url"
+                      required
+                      value="https://api.deepseek.com/v1"
+                    /><label for="model">模型名称</label
+                    ><input
+                      id="model"
+                      required
+                      value="deepseek-flash"
+                      maxlength="200"
+                    /><label for="api-key"
+                      >API 密钥
+                      <span id="key-optional" class="optional"></span></label
+                    ><input
+                      id="api-key"
+                      type="password"
+                      autocomplete="off"
+                      placeholder="输入模型服务的密钥"
+                    />
+                    <p id="key-help" class="field-help">
+                      密钥仅用于本次任务，不写入评测记录。
+                    </p>
+                  </div>
+                  <div class="field-row">
+                    <div>
+                      <label for="workers">并发数</label
+                      ><input
+                        id="workers"
+                        type="number"
+                        min="1"
+                        max="10"
+                        value="10"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label for="token-budget">输出预算</label
+                      ><input
+                        id="token-budget"
+                        type="number"
+                        min="1"
+                        max="65536"
+                        value="16384"
+                        required
+                      />
+                    </div>
+                  </div>
+                  <label class="check-row"
+                    ><input id="thinking" type="checkbox" checked /><span
+                      >请求思考模式</span
+                    ></label
+                  >
+                  <p class="field-help">
+                    输出预算包含思考与正文。并发数会记录在报告中。
+                  </p>
+                  <p id="form-error" class="error-message" role="alert"></p>
+                  <button id="start-button" class="primary" type="submit">
+                    开始 Benchmark 评测 <span aria-hidden="true">↗</span>
+                  </button>
+                </form>
+              </section>
+
+              <section class="results-panel" aria-labelledby="results-title">
+                <div class="panel-title">
+                  <h2 id="results-title">评测结果</h2>
+                  <span id="job-badge" class="badge">等待开始</span>
+                </div>
+                <div id="empty-results" class="empty-results">
+                  <div class="sample-grid" aria-hidden="true"></div>
+                  <h3>每一次回答，都留下依据。</h3>
+                  <p>
+                    任务开始后，这里会显示逐题进度、真实得分和请求质量。没有测得的数据不会补成零。
+                  </p>
+                </div>
+                <div id="job-results" hidden>
+                  <div class="run-heading">
+                    <div>
+                      <h3 id="job-model"></h3>
+                      <p id="job-meta" class="muted"></p>
+                    </div>
+                    <button id="cancel-button" class="danger-quiet" hidden>
+                      停止任务
+                    </button>
+                  </div>
+                  <div class="progress-label">
+                    <span id="progress-text">等待执行</span
+                    ><span id="progress-count"></span>
+                  </div>
+                  <div class="progress-track">
+                    <div id="progress-fill"></div>
+                  </div>
+                  <div
+                    id="case-grid"
+                    class="case-grid"
+                    aria-label="逐题状态"
+                  ></div>
+                  <div class="legend">
+                    <span><i class="passed"></i>通过 / 成功</span
+                    ><span><i class="failed"></i>答错</span
+                    ><span><i class="error"></i>错误</span
+                    ><span><i class="pending"></i>等待</span>
+                  </div>
+                  <p id="job-error" class="error-message" role="status"></p>
+                  <div id="metrics" class="metrics"></div>
+                  <div class="result-actions">
+                    <button id="show-report" class="secondary" hidden>
+                      查看完整报告</button
+                    ><a id="download" class="text-action" hidden
+                      >下载原始记录</a
+                    >
+                  </div>
+                  <div id="cases-section" class="cases-section" hidden>
+                    <h3>逐题记录</h3>
+                    <div class="table-scroll">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>题目</th>
+                            <th>状态</th>
+                            <th>说明</th>
+                          </tr>
+                        </thead>
+                        <tbody id="case-rows"></tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+            <section class="history-section">
+              <div class="history-heading">
+                <h2>历史评测</h2>
+                <button id="refresh-history" class="quiet">刷新</button>
+              </div>
+              <p id="empty-history" class="muted">
+                尚无评测记录。完成一次测试后，可在这里重新打开报告。
+              </p>
+              <div id="history" class="history-list"></div>
+            </section>
+          </div>
+        </div>
+      </main>
+    </div>
+    <dialog id="report-dialog">
+      <div class="dialog-heading">
+        <h2>完整报告</h2>
+        <button id="close-report" class="quiet" aria-label="关闭报告">
+          关闭 ×
+        </button>
+      </div>
+      <pre id="report-content"></pre>
+    </dialog>
+  </body>
+</html>

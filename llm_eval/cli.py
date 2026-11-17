@@ -6,32 +6,31 @@ import sys
 from dataclasses import fields, replace
 from pathlib import Path
 
-from .artifacts import RunLock, load_manifest, load_snapshot, write_atomic
-from .reporting import RunSummary, render_markdown_report
-from .runner import EvaluationRunner
-from .settings import config_from_snapshot, load_framework_config
-from .status import RunStatus
-from .tasks import DEFAULT_TASK_NAME, TASK_REGISTRY
+from llm_eval.core.artifacts import RunLock, load_manifest, load_snapshot, write_atomic
+from llm_eval.core.reporting import RunSummary, render_markdown_report
+from llm_eval.core.runner import EvaluationRunner
+from llm_eval.core.settings import config_from_snapshot, load_framework_config
+from llm_eval.core.status import RunStatus
+from llm_eval.tasks import DEFAULT_TASK_NAME, TASK_REGISTRY
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="llm-eval", description="Engineering-first LLM evaluation framework")
+    parser = argparse.ArgumentParser(prog="llm-eval", description="LLM benchmark performance and API service quality")
     subparsers = parser.add_subparsers(dest="command")
     for command, task, help_text in (
-        ("api-test", "api_experience", "30 streaming requests, one worker, no retries"),
+        ("api-test", "api_experience", "30 streaming requests, configurable concurrency, no retries"),
         ("quick-test", "quick40", "Fixed 40 original-language benchmark cases"),
     ):
-        sub = subparsers.add_parser(command, help=help_text)
+        sub = subparsers.add_parser(command, aliases=["api"] if command == "api-test" else [], help=help_text)
         sub.add_argument("--config", default="configs/model.yaml", help="Model config YAML")
-        sub.set_defaults(task=task, workers=1, limit=None, resume=None)
-        if command == "quick-test":
-            sub.add_argument("--workers", type=int, default=1)
+        sub.set_defaults(task=task, limit=None, resume=None)
+        sub.add_argument("--workers", type=int, default=None)
     for command, help_text in (
         ("run", "Generate and grade"),
         ("generate", "Save model answers without executing grading"),
         ("resume", "Continue a compatible run without repeating finished cases"),
     ):
-        sub = subparsers.add_parser(command, help=help_text)
+        sub = subparsers.add_parser(command, aliases=["benchmark"] if command == "run" else [], help=help_text)
         sub.add_argument("--config", default="configs/model.yaml", help="Model config YAML")
         sub.add_argument("--task", default=None, help="Task name (inferred for resume)")
         sub.add_argument("--workers", type=int, default=None)
@@ -119,7 +118,7 @@ def main(argv: list[str] | None = None) -> int:
             operation = (
                 resume_manifest["operation"]
                 if resume_manifest
-                else ("run" if args.command in {"api-test", "quick-test"} else args.command)
+                else ("run" if args.command in {"api-test", "api", "quick-test", "benchmark"} else args.command)
             )
             runner = EvaluationRunner(config, operation=operation, resume_dir=resume_dir)
     except (OSError, ValueError, KeyError) as exc:

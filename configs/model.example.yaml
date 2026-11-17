@@ -38,7 +38,8 @@ reasoning_effort:
 # Lightweight modes:
 #   uv run llm-eval api-test --config configs/my-model.yaml
 #   uv run llm-eval quick-test --config configs/my-model.yaml
-# Both default to one worker; api-test always enforces one and disables retries.
+# Both honor workers in the config or --workers; API tests always disable retries.
+# Without an explicit worker setting, fixed suites default to one worker.
 # quick-test defaults to 4096 output tokens. api-test uses scenario caps 256/768/256.
 # Optional override (use the same value for every channel in a comparison):
 # max_output_tokens: 4096

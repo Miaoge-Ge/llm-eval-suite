@@ -30,7 +30,7 @@ jobs:
           version: "0.9.11"
           python-version: "3.12.3"
           enable-cache: true
-      - run: uv sync --frozen --extra dev
+      - run: uv sync --frozen --extra dev --extra web
       - name: Lint and type check
         if: runner.os == 'Linux'
         run: |
@@ -73,7 +73,7 @@ jobs:
           LLM_EVAL_DOCKER_TESTS: "1"
         run: |
           uv run --frozen python -c "from pathlib import Path; Path('.pytest_cache').mkdir(exist_ok=True)"
-          uv run --frozen pytest tests/test_docker_integration.py tests/test_lightweight_suites.py::test_full_quick40_reference_run_resume_and_offline_grading --basetemp .pytest_cache/docker --junitxml=results/ci/docker.xml
+          uv run --frozen pytest tests/integration/test_docker_integration.py tests/integration/test_lightweight_suites.py::test_full_quick40_reference_run_resume_and_offline_grading --basetemp .pytest_cache/docker --junitxml=results/ci/docker.xml
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

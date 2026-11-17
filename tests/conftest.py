@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from llm_eval.settings import DatasetConfig, ExecutionConfig, FrameworkConfig, ModelConfig, RunConfig
+from llm_eval.core.settings import DatasetConfig, ExecutionConfig, FrameworkConfig, ModelConfig, RunConfig
 
 
 @pytest.fixture

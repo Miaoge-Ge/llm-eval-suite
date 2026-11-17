@@ -1,373 +1,94 @@
-# LLM Eval Framework
+# LLM Eval Suite
 
-[English Documentation](README.md)
+[English](README.md) · [CLI 完整参考](docs/reference_CN.md) · [网页部署](docs/deployment.md)
 
-一个面向工程使用的 LLM 评测框架。默认用 `uv` 管理环境，配置极简（单个模型配置文件），每次运行只产出一个自包含的 Markdown 报告，支持任意 OpenAI-compatible 接口。
+通过命令行或网页，对 OpenAI 兼容接口进行模型能力评测和 API 服务质量测试。每轮保存原始回答、有效配置、计时与评分依据。
 
-## 特点
+| 功能 | 状态 | 用途 |
+| --- | --- | --- |
+| Benchmark 测试 | 已实现 | 代码、数学、知识、指令遵循；完整题库与固定 Quick40 |
+| API 测试 | 已实现 | 首试成功率、流式延迟、中断、截断、可观测吞吐 |
+| 模型验证 | 待开发 | 未来与可信参考模型比较；当前不生成模型真伪结论 |
 
-- 默认使用 `uv` 管理依赖与运行环境
-- 可安装的 Python 包（`hatchling` 构建后端），提供 `llm-eval` 命令行入口
-- 单一模型配置文件，密钥用 `${ENV_VAR}` 占位符注入
-- 内置 10 个评测任务，涵盖代码生成、数学推理、多选知识题三大类
-- OpenAI-compatible 客户端，支持流式输出、自动重试与 token 用量统计
-- 每次运行只产出一个自包含 Markdown 报告（配置 + 指标 + 逐条结果）
-- 知识题任务自动生成分学科 / 分领域准确率明细
-- 支持 `thinking` 与可配置的 `reasoning_effort`
-- 评测过程中显示实时进度条（通过数 / 失败数 / 最近 HTTP 状态）
-- 内置质量工具链：`ruff`（检查 + 格式化）、`mypy`（类型检查）、`pytest`
+## 快速开始
 
-## 目录结构
+需要 Python 3.10+、[uv](https://docs.astral.sh/uv/)，代码题需要 Docker Linux 容器环境。
+
+```bash
+git clone https://github.com/Miaoge-Ge/llm-eval-suite.git
+cd llm-eval-suite
+uv sync --frozen --extra web
+cp configs/model.example.yaml configs/model.yaml
+# 设置 OPENAI_API_KEY，并修改配置中的模型名和接口地址。
+docker pull python:3.12-slim
+docker build -t llm-eval-python:3.12-numpy2.2.6 -f docker/Dockerfile.numpy docker
+uv run llm-eval benchmark --task quick40 --config configs/model.yaml --workers 10
+uv run llm-eval api --config configs/model.yaml --workers 10
+```
+
+PowerShell 使用 `Copy-Item` 复制文件，用 `$env:OPENAI_API_KEY = '你的密钥'` 设置环境变量。真实密钥不要写入提交到 Git 的配置。兼容原有 `run`、`api-test`、`quick-test` 命令。
+
+完整题库包括 HumanEval/Plus、MBPP/Plus、GSM8K、AIME 2025/2026、GPQA、MMLU-Pro、IFEval、LiveCodeBench。LiveCodeBench 私有测试需要额外下载，见 [CLI 参考](docs/reference_CN.md)。
+
+## 网页工作台
+
+```bash
+export LLM_EVAL_ADMIN_PASSWORD='设置足够长的私有访问密码'
+export LLM_EVAL_SESSION_SECRET="$(python -c 'import secrets; print(secrets.token_hex(32))')"
+# 可选：设置 DEEPSEEK_API_KEY，供默认 DeepSeek 地址使用。
+uv run --extra web llm-eval-web
+```
+
+访问 `http://127.0.0.1:8080`，登录后可配置测试、查看逐题进度、停止任务、打开历史报告、下载原始记录。同一时间执行一个任务，每个任务最多 10 并发，运行及排队任务最多五个。模型验证页标注“开发中”。自定义密钥仅驻留内存；服务器默认密钥放在受保护的环境文件中。公网部署使用 HTTPS，详见 [部署说明](docs/deployment.md)。
+
+## 评测规则
+
+- **Quick40**：四个维度各 10 题，保留原题、来源 ID、内容哈希和选题理由。不能用 `--limit` 缩减固定题包；选中 Plus 题目的扩展测试完整执行。
+- **API**：短回答、长回答、长上下文各 10 次流式请求。每题请求一次，不自动重试，不支持续跑。并发设置存入原始记录，离线重算保留原测量并发。
+- **计时**：首段有效内容可为思考内容，首段正文单独记录；保留逐段时间戳。仅在 token 用量和正文时间窗口可靠时估算 TPS，否则显示缺失。传输成功与截断分别报告。
+- **评分**：接口错误与答错分开；准确率同时报告评分覆盖率和错误数。只有思考内容、因 token 上限结束的回答保留截断标记，不再重复请求。
+- **恢复**：Benchmark 支持续跑；两个固定题包均支持无 API 调用的离线重评分，结果另存，原始运行保留。
+
+```bash
+uv run llm-eval grade --run-dir results/<model>/<task>/<run>
+uv run llm-eval report --run-dir results/<model>/<task>/<run>
+uv run llm-eval resume --run-dir results/<model>/<task>/<run> --config configs/model.yaml
+```
+
+## 按功能划分目录
 
 ```text
 llm_eval/
-  cli.py
-  clients.py
-  execution.py         # 子进程运行生成代码
-  extraction.py        # 答案提取（代码块、\boxed{}、选项字母、数字）
-  reporting.py         # 运行落盘（JSONL + 配置快照）与 Markdown 渲染
-  runner.py
-  settings.py
-  status.py            # 用例状态常量
-  tasks.py
-  utils.py
-  ifeval/              # vendored 的 Google IFEval 校验器 + 打分胶水代码
-configs/
-  model.example.yaml   # 已提交的模板（不含密钥）
-datasets/
-  HumanEval.jsonl
-  HumanEvalPlus.jsonl
-  MBPP.jsonl
-  MBPPPlus.jsonl
-  GSM8K.jsonl
-  AIME2025.jsonl
-  AIME2026.jsonl
-  GPQA.jsonl
-  MMLUPro.jsonl
-  IFEval.jsonl
-  LiveCodeBench.jsonl
-scripts/
-  fetch_datasets.py    # 从 Hugging Face 重新下载/生成数据集
-tests/
-pyproject.toml
+  benchmark/          # 能力任务、评分、Quick40、报告
+  api_testing/        # API 固定题包、流式指标、质量报告
+  model_verification/ # 规划说明，尚未实现
+  core/               # 共用客户端、调度、执行、存储
+  web/                # FastAPI 服务与网页界面
+  cli.py              # 命令入口
+  tasks.py            # 公开任务注册表
+datasets/benchmark/   # 原始 benchmark 数据
+scripts/benchmark/    # 导入题库、构建固定题包
+scripts/api_testing/  # 构建 API 题包
+tests/                # 按功能分类，另含集成与网页测试
+configs/              # 无密钥示例、DeepSeek CI 配置
+deploy/               # systemd、Caddy 模板
+docs/                 # CLI、部署参考
 ```
 
-## 安装
+## GitHub CI 与真实测试
 
-推荐方式：
+普通 CI 包括 Linux/Windows 回归、Ruff、mypy、真实 Docker 测试，不调用模型。手动运行 **DeepSeek live evaluation** 工作流时，从 Secret `DEEPSEEK_API_KEY` 读取密钥，先跑 30 次 API 测试，再跑全部 40 道能力题，两者均为 **10 workers**。
+
+DeepSeek 配置显式启用思考，思考与正文共享 **16,384 token** 输出预算。首轮实测因预算过小，在思考阶段耗尽额度，失败记录保留在 Actions 中。增加预算不改变原题及要求回答的长度；横向对比需要使用同一设置。计时反映运行机器的网络条件。
 
 ```bash
-uv sync
+uv sync --frozen --extra dev --extra web
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy llm_eval
+uv run pytest
+# 准备 Docker 镜像后；PowerShell 先设置 $env:LLM_EVAL_DOCKER_TESTS='1'
+LLM_EVAL_DOCKER_TESTS=1 uv run pytest tests/integration
 ```
 
-安装开发依赖（`pytest`、`ruff`、`mypy` 及类型存根）：
-
-```bash
-uv sync --extra dev
-```
-
-## 模型配置
-
-把已提交的模板复制为本地配置（`configs/` 目录除示例外都被 git 忽略，因此真实密钥不会被提交）：
-
-```bash
-cp configs/model.example.yaml configs/model.yaml
-```
-
-[configs/model.example.yaml](configs/model.example.yaml)：
-
-```yaml
-base_url: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
-api_key: ${OPENAI_API_KEY}
-model_name: gpt-4.1-mini
-workers: 10
-timeout_seconds: 120
-execution_timeout_seconds: 20
-thinking_enabled: false
-reasoning_effort:
-```
-
-建议用 `${ENV_VAR}` 占位符注入密钥，避免把 API Key 明文写入文件。可识别的字段：
-
-| 字段 | 含义 |
-| --- | --- |
-| `base_url` | OpenAI-compatible 接口地址 |
-| `api_key` | API 密钥（建议用 `${OPENAI_API_KEY}`） |
-| `model_name` | 发送给接口的模型 id，同时用于命名输出目录 |
-| `workers` | 并发请求数（默认 `10`） |
-| `timeout_seconds` | 单次请求的 HTTP 超时（默认 `120`） |
-| `execution_timeout_seconds` | 打分时运行生成代码的时间上限（默认 `20`） |
-| `thinking_enabled` | `true`/`false`（也接受 `enabled`/`disabled`） |
-| `reasoning_effort` | `low`/`medium`/`high`/`max`，仅在开启思考模式时发送 |
-
-每次运行写入 `results/<model_name>/<task>/` 下独立的时间戳目录（模型名会做 slug 处理,`org/model:beta` 这类 id 在任何平台都安全)。
-
-## CLI 用法
-
-```bash
-# 运行某个评测任务
-uv run llm-eval run --config configs/model.yaml --task gpqa
-
-# 等价的模块形式
-uv run python -m llm_eval run --config configs/model.yaml --task gsm
-
-# 冒烟测试：只跑前 5 个用例，并发 2
-uv run llm-eval run --config configs/model.yaml --task gsm --limit 5 --workers 2
-
-# 列出所有可用任务
-uv run llm-eval run --list-tasks
-```
-
-`--config` 默认 `configs/model.yaml`，`--task` 默认 `humaneval`。`--workers` 覆盖配置文件中的并发数；`--limit N` 只跑前 N 个用例，适合在全量评测前先验证新接口。
-
-### 运行全部评测
-
-```bash
-# 代码生成
-uv run llm-eval run --config configs/model.yaml --task humaneval
-uv run llm-eval run --config configs/model.yaml --task humanevalplus
-uv run llm-eval run --config configs/model.yaml --task mbpp
-uv run llm-eval run --config configs/model.yaml --task mbppplus
-uv run llm-eval run --config configs/model.yaml --task livecodebench
-
-# 数学推理
-uv run llm-eval run --config configs/model.yaml --task gsm
-uv run llm-eval run --config configs/model.yaml --task aime2025
-uv run llm-eval run --config configs/model.yaml --task aime2026
-
-# 多选知识题
-uv run llm-eval run --config configs/model.yaml --task gpqa
-uv run llm-eval run --config configs/model.yaml --task mmlu_pro
-
-# 指令遵循
-uv run llm-eval run --config configs/model.yaml --task ifeval
-```
-
-命令启动后会立即打印：当前任务、模型、数据集路径、并发数、思考模式、输出目录，随后在处理用例时显示实时进度条（通过数 / 失败数 / 最近一次 HTTP 状态码）。
-
-## 思考模式
-
-对于支持该能力的服务端，当 `thinking_enabled` 开启时，客户端会发送 `reasoning_effort` 和 `extra_body={"thinking": {"type": "enabled"}}`。对应的 SDK 调用形式：
-
-```python
-from openai import OpenAI
-
-client = OpenAI(api_key="...", base_url="https://api.deepseek.com")
-
-response = client.chat.completions.create(
-    model="deepseek-v4-pro",
-    messages=[
-        {"role": "system", "content": "You are a helpful assistant"},
-        {"role": "user", "content": "Hello"},
-    ],
-    reasoning_effort="high",
-    extra_body={"thinking": {"type": "enabled"}},
-)
-```
-
-## 当前支持任务
-
-### 代码生成
-
-| 任务 | 数据集 | 题数 | 打分方式 |
-| --- | --- | --- | --- |
-| `humaneval` | HumanEval | 164 | 执行生成代码并跑单元测试 |
-| `humanevalplus` | HumanEval+ | 164 | 扩展测试，使用真实 NumPy 2.2.6 |
-| `mbpp` | MBPP | 974 | 执行生成代码并跑断言测试 |
-| `mbppplus` | MBPP+ | 378 | EvalPlus 扩展测试，使用真实 NumPy 2.2.6 |
-| `livecodebench` | LiveCodeBench stdin 子集 | 219 | 604 个公开测试与 2,502 个私有测试 |
-
-### 数学推理
-
-| 任务 | 数据集 | 题数 | 打分方式 |
-| --- | --- | --- | --- |
-| `gsm` | GSM8K | 1319 | 精确匹配 `#### <数字>` 末尾答案 |
-| `aime2025` | AIME 2025 (I+II) | 30 | 对 `\boxed{}` 内答案做整数匹配 |
-| `aime2026` | AIME 2026 (I+II) | 30 | 对 `\boxed{}` 内答案做整数匹配 |
-
-### 多选知识题
-
-多选任务要求模型输出 `\boxed{A/B/C/D}`，按字母精确匹配打分。报告中会自动生成分领域准确率明细。
-
-| 任务 | 数据集 | 题数 | 覆盖范围 |
-| --- | --- | --- | --- |
-| `gpqa` | GPQA-Diamond | 198 | 博士级科学题（物理、化学、生物） |
-| `mmlu_pro` | MMLU-Pro | 420 | 14 个学科，10 选项（每类采样 30 题） |
-
-### 指令遵循
-
-| 任务 | 数据集 | 题数 | 打分方式 |
-| --- | --- | --- | --- |
-| `ifeval` | IFEval | 541 | 对每条指令做程序化校验（prompt 级 strict 准确率） |
-
-`livecodebench` 保留固定 `test.jsonl` 版本中的 219 道 stdin/stdout 题（AtCoder/Codeforces），不包含 functional/LeetCode 题型或后续版本。报告和 CLI 会明确显示评测子集及公开/私有测试覆盖。旧版仅含公开样例的快照仍可评分，但会标明覆盖不足，不能将其通过率作为完整测试成绩。输出比较先按行去除首尾空白，再做精确十进制 token 比较，不使用浮点容差、不忽略顺序。
-
-私有测试按题压缩存放在 `datasets/LiveCodeBench.private/`（约 818 MiB，不纳入 Git）。全新检出后先准备：
-
-```bash
-uv run --with huggingface-hub python scripts/fetch_datasets.py livecodebench
-# 也可以使用已下载的上游原始文件：
-uv run python scripts/fetch_datasets.py livecodebench --source /path/to/test.jsonl
-```
-
-导入器固定数据版本 `0fe84c3912ea0c4d4a78037083943e8f0c4dd505`，拒绝私有测试缺失或题型不兼容的输入，最后原子更新索引。上游压缩数据通过禁止可执行对象的反序列化器读取，单题解压上限为 512 MiB。运行前校验 SHA-256，并将选中题目的测试文件复制到运行目录；离线评分不依赖原数据目录。测试逐条读取，每次运行会占用相应快照磁盘空间；文件缺失或损坏时，在请求模型前失败。`ifeval` 使用 `llm_eval/ifeval/` 中的 Google 指令校验器和 `langdetect`。其他数据集可用 `uv run --with datasets python scripts/fetch_datasets.py <name>` 重新生成。
-
-### Plus 执行环境与评分
-
-Plus 任务改用固定版本的真实 NumPy，支持数组、广播、无穷值和 dtype 行为。首次运行前构建镜像：
-
-```bash
-docker build -t llm-eval-python:3.12-numpy2.2.6 -f docker/Dockerfile.numpy docker
-```
-
-未显式配置 `execution.image` 时，Plus 自动选择上述镜像，其他代码任务仍用 `python:3.12-slim`。自定义镜像也必须安装 NumPy 2.2.6；框架在生成前进入实际沙箱探测依赖，缺失或版本不符记为基础设施错误，不计为模型答错。BLAS 线程数固定为 1，本地开发使用项目中同版本依赖。旧 Plus 回答可用 `grade --run-dir PATH --execution-image llm-eval-python:3.12-numpy2.2.6` 重新评分。
-
-Plus 导出的测试程序在浮点容差比较前补齐类型和序列长度检查，避免 NumPy 广播把错误结构的答案判为通过；HumanEval/32 原先错误的求根断言已修正为使用标量结果计算多项式残差的绝对值。题目输入和容差不变。执行时限、内存仍按配置约束，与 EvalPlus 按参考耗时设置预算的策略不同；较慢或占用内存较大的正确实现仍可能达到限制。Windows 本地浮点结果可能与数据集中按 Linux 生成的期望值存在差异，默认使用 Docker Linux 评分。
-
-## 输出产物
-
-每次运行写入独立的时间戳目录：
-
-```text
-results/<model_name>/<task>/<YYYYMMDD-HHMMSS>/
-  manifest.json  # 版本化运行清单与复现指纹
-  dataset.jsonl  # 本次选中用例的快照，包含评分输入
-  generations/   # 不覆盖的原始回答及请求、重试记录
-  cases/         # 原子写入的逐用例检查点
-  results.jsonl   # 增量结果；续跑时由检查点重建
-  config.json     # 本次运行的有效配置快照（API Key 已脱敏）
-  report.md       # 人类可读的评测报告
-  status.json     # 原子更新的运行状态、完成数和停止原因
-  summary.json    # 最终结构化指标，含覆盖率和基础设施错误率
-```
-
-原始回答先原子落盘，再进入评分，保留原始空白、推理内容、失败请求的部分回答、请求消息、实际参数、每次尝试的元数据和已知用量。配置快照中的 API key 会脱敏，请求参数不包含密钥。逐用例检查点是恢复依据，续跑可重建被截断的 `results.jsonl`。`sessions/` 保存各次会话配置，`history/` 在续跑前备份旧 JSONL；新运行使用独立目录。
-
-### 只生成、断点续跑与离线重新评分
-
-```bash
-# 只保存回答，不执行生成代码、不评分
-uv run llm-eval generate --config configs/model.yaml --task humaneval --limit 10
-# 在原目录继续原来的操作
-uv run llm-eval resume --config configs/model.yaml --run-dir results/<model>/<task>/<run>
-# 使用当前评分器重新评分，无需模型接口或 API key
-uv run llm-eval grade --run-dir results/<model>/<task>/<run>
-# 根据已结束运行的检查点和汇总重新生成 Markdown 报告
-uv run llm-eval report --run-dir results/<model>/<task>/<run>
-```
-
-也可使用 `run --resume PATH` 或 `generate --resume PATH`，恢复的操作以原运行清单为准。已结束的评分不重复执行；回答已保存但评分未完成时直接复用回答，不重复请求模型。API 错误可以重试，历史请求次数和用量持续累计；报告分别列出累计消耗与本次会话新增消耗。`GENERATED` 仅表示回答已保存，不表示通过，只生成模式的评分覆盖率为零。
-
-续跑会校验数据集、选中用例、提示词、模型参数、执行配置、框架代码、Python 版本和依赖锁文件；允许修改并发数和 API key。指纹不一致时，在修改原运行产物前拒绝续跑。修改评分器后请用 `grade`，或启动新运行。需要严格复现时请把 Docker 镜像固定到 digest，可变标签无法保证执行环境完全一致。
-
-离线 `grade` 使用保存的数据集快照和回答，在 `<原目录>/regrades/` 下创建独立结果（可用 `--output-dir` 指定），并记录来源；不会访问模型接口，API 次数和 token 消耗记为零。代码评分默认使用 Docker，即使原运行采用本地执行；只有显式传入 `--execution-backend local` 才启用可信代码的本地执行。缺失或不完整的回答记为 `MISSING_GENERATION`，不会自动补调模型。原始回答保存失败记为 `STORAGE_ERROR`，中止运行且不对该回答评分。离线评分中断后，可从原始来源再次执行 `grade`。旧版本未保存的回答无法补恢复。`report` 要求已有最终汇总；运行中断时先续跑或重新评分。
-
-`report.md` 包含：
-
-- **Overview** — 任务、模型、数据集、并发数、思考模式
-- **Metrics** — 通过率、总用例 / 完成 / 参与打分用例数、总用时、吞吐、prompt/completion/total tokens（参与打分 = 通过 + 失败 + 超时；API 报错不计入通过率分母）
-- **Status counts** — 各状态（通过 / 失败 / 报错等）计数
-- **Accuracy by domain** — 分学科准确率明细（仅知识题任务）
-- **Results** — 逐条结果表：状态、用时、tokens、详情列
-
-代码任务默认使用 Docker Linux 容器；启动前检查运行时、资源限制能力和本地镜像，失败时停止，不会自动降级到本机执行。数学、知识题和 IFEval 不依赖 Docker。
-
-### 执行隔离与资源限制
-
-Windows 上使用 Docker Desktop 的 Linux 容器模式，并先准备镜像：
-
-```powershell
-docker pull python:3.12-slim
-```
-
-模型配置可增加以下内容，完整示例见 `configs/model.example.yaml`：
-
-```yaml
-execution:
-  backend: docker
-  # image: python:3.12-slim  # 可选；Plus 默认使用含 NumPy 的镜像
-  memory_mb: 256
-  cpus: 1.0
-  pids_limit: 64
-  max_output_bytes: 1048576
-  tmpfs_mb: 32
-```
-
-每次执行使用独立容器，不挂载宿主目录，不传入模型密钥，禁用网络，以非 root 用户运行，根文件系统只读并移除额外权限。内存与进程数按容器整体限制；`cpus` 是 CPU 配额，`execution_timeout_seconds` 是单次执行的墙钟时间上限。`/work`、`/tmp` 各使用一个大小为 `tmpfs_mb` 的内存文件系统；标准输出和标准错误共享 `max_output_bytes` 上限。达到限制后停止执行，并限制保存在内存和结果中的输出量。
-
-容器创建、检查、清理等控制操作各另设 15 秒超时。超时、取消、正常结束及错误退出都会清理容器或本地进程树；容器清理失败会记录为 `EXECUTION_ERROR` 并中止运行，错误中保留容器名称。镜像不会自动下载；可用固定 digest 代替 tag 以锁定执行环境。Docker 容器不是虚拟机，完成标记也不提供针对恶意候选代码的评分防篡改保证。
-
-`backend: local` 仅供可信代码的开发测试。它使用独立临时目录、环境变量白名单、输出与超时限制，并清理进程树；Windows 使用 Job Object 限制整体内存和进程数，POSIX 使用进程组与进程资源限制。本地模式不隔离网络或宿主文件系统，也不提供 Docker 的整体 CPU/磁盘限制；POSIX 本地模式没有整体内存/PID 配额。Windows 虚拟环境启动器通常占用两个进程名额。
-
-### 运行状态与退出码
-
-`status.json` 运行时为 `RUNNING`，结束后为 `COMPLETED`、`FAILED`、`ABORTED` 或 `INTERRUPTED`。中断和失败也会保存已完成结果、未执行项的 `CANCELLED` 记录及最终报告。调度队列最多保留 `workers` 个在途任务；认证或执行后端致命错误发生后停止提交新任务。
-
-| CLI 退出码 | 含义 |
-| --- | --- |
-| 0 | 评测正常完成；模型答错、超时或资源超限仍可属于正常完成的评测 |
-| 1 | 配置错误 |
-| 2 | 评测未完整完成，或存在 API / 执行环境 / 框架错误 |
-| 130 | 用户中断 |
-
-按 Ctrl+C 后停止调度、取消代码执行和重试，尝试关闭正在读取的模型响应，并保留已知用量。尚未返回响应的 HTTP 请求仍可能等待 `timeout_seconds`；强制结束宿主进程或关闭 Docker 服务无法保证清理完成。报告同时展示参与评分的准确率、评分覆盖率、取消数和基础设施错误率，避免把部分结果当成完整成绩。`OUTPUT_LIMIT`、`RESOURCE_LIMIT` 计为已评分失败；`EXECUTION_ERROR`、`CANCELLED` 不计入准确率分母。
-
-### 评分与重试规则
-
-- AIME 接受最后一个 `\boxed{}` 中的 1–3 位非负整数（如 `070`），未使用盒子时只接受最后一行的整数；不对小数取整，也不从表达式中截取数字。
-- 选择题对盒内答案做完整匹配，接受 `B`、`(B)`、`Answer: B` 等明确格式；无盒子时采用最后一次明确答案声明或末行独立选项。无效的最后答案不会回退到之前的答案。
-- GSM8K 使用精确有限十进制比较，不再使用浮点舍入或容差。优先取最后一个 `####` 后的值，最终标记无效时不回退。没有标记时，仅接受最后一行的完整数值，或完整的 `answer is` / `answer:` / `total is` / `total:` 声明；不会从分数、表达式或推理中的数字片段提取答案。标准答案无效记为框架错误，不计为模型答错。
-- Python 代码提取先去除公共缩进，再清理首尾空白，保留函数体补全中的嵌套层级。
-- IFEval 在启动工作线程前加载语言检测配置，并固定检测器种子为 0，保证语言评分在多线程和多次运行之间可重复。
-- 代码测试程序必须正常执行到末尾；`sys.exit(0)`、`os._exit(0)` 提前退出不算通过。空测试集记为 `INTERNAL_ERROR`，且不发送模型请求。完成检查不构成防篡改沙箱；stdin/stdout 题仍按实际输出判分。
-- 每个用例最多调用接口 3 次（含首次调用），关闭 SDK 内层重试。连接/传输错误、HTTP 408/409/429/5xx 和空回答可重试；401/403 立即返回致命错误，其他 HTTP 客户端错误不重试。
-- 失败尝试已返回的 token 用量仍计入总量。`results.jsonl` 增加 `api_attempts` 和 `usage_complete`，报告汇总请求次数及用量不完整的用例数；服务端未返回的用量不作估算。
-- 流式响应必须包含第 0 个回答的终止 `finish_reason`。仅遇到正常 EOF 或 `[DONE]` 不代表回答完整：此类部分回答会保存，并在同一重试预算内重试，不进入成功生成后的评分流程。明确返回 `length` 则属于模型输出限制，不额外重试；不会拼接其他候选回答。
-- 续跑和报告重建会在改写已有结果前拒绝损坏的记录、负数或非整数用量、重复回答 ID、未知检查点状态，以及关联到缺失、不完整或其他题目回答的已完成检查点。
-
-## 开发
-
-### GitHub Actions
-
-`CI` 在 push、PR 和手动触发时运行 Linux/Windows 回归、Ruff、mypy，以及真实 Docker 集成测试。普通 CI 不调用模型 API，固定 40 题的容器测试使用参考答案。
-
-`DeepSeek live evaluation` 仅手动触发，使用 `configs/deepseek.ci.yaml` 和仓库 Actions Secret `DEEPSEEK_API_KEY`：
-
-```bash
-gh workflow run deepseek-live.yml --ref main
-```
-
-它依次执行 `api-test`（30 次流式请求、单并发、禁止重试）和 `quick-test`（固定 40 题、完整 Plus 测试、真实 Docker）。当前配置使用 `https://api.deepseek.com/v1` 的 `deepseek-flash`，显式启用思考；API 输出上限按场景为 256/768/256，能力测试为 4096。计时反映 GitHub 托管 runner 到服务端的网络环境。
-
-工作流保留真实评分结果；模型答错不作为 CI 基础设施失败，API、运行及存储错误会导致工作流失败。即使计时步骤失败，也会继续尝试能力测试。报告展示在运行 Summary，原始响应、逐段计时和 JSON/Markdown 报告作为 artifact 保留 14 天。真实测试不会在 PR 上自动运行。
-
-也可以在本地设置 `DEEPSEEK_API_KEY` 后执行：
-
-```bash
-uv run llm-eval api-test --config configs/deepseek.ci.yaml
-uv run llm-eval quick-test --config configs/deepseek.ci.yaml
-```
-
-### 本地验证
-
-所有工具均在 `pyproject.toml` 中配置，并通过 `uv` 运行：
-
-```bash
-uv run ruff check .    # 代码检查
-uv run ruff format .   # 自动格式化
-uv run mypy            # 类型检查
-uv run pytest          # 运行测试
-```
-
-默认测试不请求真实模型接口。真实容器集成测试需准备 Docker 和镜像后显式启用：
-
-```powershell
-$env:LLM_EVAL_DOCKER_TESTS = "1"
-uv run pytest tests/test_docker_integration.py tests/test_lightweight_suites.py
-```
-
-未启用时容器集成测试显示为跳过；模拟 Docker 调用的测试不能替代真实容器验证。
-
-`test_lightweight_suites.py` 同时覆盖固定题包、30 次请求的无重试统计，以及真实 Docker 下的 40 题参考答案评分、续跑和离线重评分。API 错误使用模拟 HTTP 服务注入，不消耗真实模型额度。
-
-Windows 沙箱的默认临时目录可能过长，导致文件读写报 `FileNotFoundError`。可为测试指定项目内的短目录，例如 `uv run pytest --basetemp .pytest_cache/run-tmp`。该目录仅存放测试临时文件，pytest 会清空它。
+Benchmark 分数、模型名称和自我介绍不能证明模型身份。未来模型验证功能将提供对比证据及不确定性，不以单次问答宣称确定真伪。

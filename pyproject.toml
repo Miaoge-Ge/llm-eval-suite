@@ -1,7 +1,7 @@
 [project]
-name = "llm-eval-framework"
+name = "llm-eval-suite"
 version = "0.1.0"
-description = "Engineering-first evaluation framework for LLM benchmarking across code and reasoning tasks."
+description = "LLM benchmark performance and API service quality, with model identity verification planned."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -13,6 +13,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+web = [
+    "fastapi>=0.115.0,<1",
+    "uvicorn>=0.30.0,<1",
+]
 dev = [
     "pytest>=8.3.0",
     "ruff>=0.8.0",
@@ -23,6 +27,7 @@ dev = [
 
 [project.scripts]
 llm-eval = "llm_eval.cli:main"
+llm-eval-web = "llm_eval.web.app:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -36,9 +41,9 @@ line-length = 120
 target-version = "py310"
 # Vendored Google IFEval checkers — kept verbatim, not subject to our lint rules.
 extend-exclude = [
-    "llm_eval/ifeval/instructions.py",
-    "llm_eval/ifeval/instructions_util.py",
-    "llm_eval/ifeval/instructions_registry.py",
+    "llm_eval/benchmark/ifeval/instructions.py",
+    "llm_eval/benchmark/ifeval/instructions_util.py",
+    "llm_eval/benchmark/ifeval/instructions_registry.py",
 ]
 
 [tool.ruff.lint]
@@ -66,9 +71,9 @@ check_untyped_defs = true
 # Vendored Google IFEval checkers — not type-checked.
 [[tool.mypy.overrides]]
 module = [
-    "llm_eval.ifeval.instructions",
-    "llm_eval.ifeval.instructions_util",
-    "llm_eval.ifeval.instructions_registry",
+    "llm_eval.benchmark.ifeval.instructions",
+    "llm_eval.benchmark.ifeval.instructions_util",
+    "llm_eval.benchmark.ifeval.instructions_registry",
 ]
 ignore_errors = true
 

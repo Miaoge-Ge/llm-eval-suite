@@ -1,6 +1,6 @@
-from .runner import EvaluationRunner
-from .settings import FrameworkConfig, load_framework_config
-from .tasks import TASK_REGISTRY, BaseEvaluationTask
+from llm_eval.core.runner import EvaluationRunner
+from llm_eval.core.settings import FrameworkConfig, load_framework_config
+from llm_eval.tasks import TASK_REGISTRY, BaseEvaluationTask
 
 __all__ = [
     "BaseEvaluationTask",

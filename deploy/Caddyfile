@@ -1,0 +1,8 @@
+# Set LLM_EVAL_DOMAIN in the Caddy service environment, or replace the placeholder.
+{$LLM_EVAL_DOMAIN} {
+    encode gzip
+    request_body {
+        max_size 64KB
+    }
+    reverse_proxy 127.0.0.1:8080
+}

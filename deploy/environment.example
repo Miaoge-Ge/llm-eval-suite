@@ -1,0 +1,7 @@
+# Copy to /etc/llm-eval-suite.env (root:root, mode 0600).
+# Generate each secret separately; do not commit the filled file.
+LLM_EVAL_ADMIN_PASSWORD=replace-with-a-private-password-at-least-12-characters
+LLM_EVAL_SESSION_SECRET=replace-with-at-least-32-random-characters
+DEEPSEEK_API_KEY=
+LLM_EVAL_DEFAULT_BASE_URL=https://api.deepseek.com/v1
+LLM_EVAL_DEFAULT_MODEL=deepseek-flash
