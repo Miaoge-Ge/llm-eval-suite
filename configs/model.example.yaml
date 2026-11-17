@@ -14,6 +14,21 @@ timeout_seconds: 120
 # Caps how long a generated code sample may run during execution-based grading.
 execution_timeout_seconds: 20
 
+# Code tasks require Docker Linux containers and a locally prepared image.
+# Docker Desktop on Windows must use the Linux container engine.
+# Prepare once: docker pull python:3.12-slim
+# Use an image digest instead of a tag for reproducible deployments.
+execution:
+  backend: docker        # local is an explicit opt-in for trusted code only
+  # Defaults: python:3.12-slim, or llm-eval-python:3.12-numpy2.2.6 for Plus tasks.
+  # Build Plus image: docker build -t llm-eval-python:3.12-numpy2.2.6 -f docker/Dockerfile.numpy docker
+  # image: python:3.12-slim  # optional override; Plus requires NumPy 2.2.6
+  memory_mb: 256         # per execution; includes all container processes
+  cpus: 1.0             # Docker CPU quota
+  pids_limit: 64
+  max_output_bytes: 1048576  # combined stdout and stderr
+  tmpfs_mb: 32           # size of each writable container tmpfs
+
 # Set to true to request reasoning/thinking from providers that support it.
 thinking_enabled: false
 
