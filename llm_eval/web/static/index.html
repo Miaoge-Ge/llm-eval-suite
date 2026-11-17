@@ -143,9 +143,9 @@
                     </div>
                   </div>
                   <div id="api-suite-note" class="suite-note" hidden>
-                    <strong>30 次独立流式请求</strong>
+                    <strong>60 次独立流式请求</strong>
                     <p>
-                      短回答、长回答和长上下文各 10 次。失败请求不自动重试。
+                      短回答、长回答、长上下文、JSON 输出、多轮上下文、中英文混合各 10 次。失败请求不自动重试。
                     </p>
                   </div>
                   <div class="field-group">
@@ -158,10 +158,11 @@
                     /><label for="model">模型名称</label
                     ><input
                       id="model"
+                      list="model-presets"
                       required
                       value="deepseek-flash"
                       maxlength="200"
-                    /><label for="api-key"
+                    /><datalist id="model-presets"></datalist><label for="api-key"
                       >API 密钥
                       <span id="key-optional" class="optional"></span></label
                     ><input
@@ -198,11 +199,11 @@
                       />
                     </div>
                   </div>
-                  <label class="check-row"
-                    ><input id="thinking" type="checkbox" checked /><span
-                      >请求思考模式</span
-                    ></label
-                  >
+                  <label for="reasoning-effort">思考强度</label>
+                  <select id="reasoning-effort" aria-describedby="reasoning-help">
+                    <option value="">默认强度（启用思考）</option>
+                  </select>
+                  <p id="reasoning-help" class="field-help" aria-live="polite"></p>
                   <p class="field-help">
                     输出预算包含思考与正文。并发数会记录在报告中。
                   </p>
@@ -255,6 +256,16 @@
                   </div>
                   <p id="job-error" class="error-message" role="status"></p>
                   <div id="metrics" class="metrics"></div>
+                  <div id="api-scenarios" class="cases-section" hidden>
+                    <h3>场景对比</h3>
+                    <p class="field-help">输出检查单独统计，不计入流式成功率。每组仅 10 次，P95 不代表长期服务承诺。</p>
+                    <div class="table-scroll">
+                      <table>
+                        <thead><tr><th>场景</th><th>成功 / 请求</th><th>正文 P50</th><th>正文 P95</th><th>截断</th><th>输出检查</th></tr></thead>
+                        <tbody id="scenario-rows"></tbody>
+                      </table>
+                    </div>
+                  </div>
                   <div class="result-actions">
                     <button id="show-report" class="secondary" hidden>
                       查看完整报告</button

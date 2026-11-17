@@ -99,12 +99,32 @@ function metric(label, value, note) {
   return item;
 }
 function configureTask() {
-  const fixed = $("task").value === "quick40";
-  $("limit-field").hidden = fixed;
-  $("suite-help").textContent = fixed
-    ? "四个维度各 10 题，完整保留代码测试。"
-    : "使用题库原题和完整评分逻辑，可设置题量上限。";
-  if (fixed) $("limit").value = "";
+  $("limit-field").hidden = false;
+  $("suite-help").textContent = "使用题库原题和完整评分逻辑，可设置题量上限。";
+}
+function configureReasoning() {
+  const catalog = state.config.reasoning_presets;
+  const name = $("model").value.trim().split("/").pop().toLowerCase();
+  const preset = catalog.models.find((item) => item.id.toLowerCase() === name);
+  const supported = preset?.efforts || catalog.efforts;
+  const select = $("reasoning-effort");
+  const previous = select.value;
+  select.replaceChildren();
+  for (const value of ["", ...supported]) {
+    const label = value === "" ? "默认强度（启用思考）" : value === "none" ? "none · 关闭思考" : value;
+    const option = element("option", label);
+    option.value = value;
+    select.append(option);
+  }
+  select.value = supported.includes(previous) ? previous : "";
+  $("reasoning-help").textContent =
+    `${preset ? preset.provider + " 预设档位" : "自定义模型，请按 API 支持情况选择"}。强度会记录在任务和报告中。` +
+    (previous && !supported.includes(previous) ? "模型已切换，原档位不可用，已恢复默认强度。" : "");
+}
+function reasoningLabel(job) {
+  if (job.reasoning_effort === "none") return "思考关闭";
+  if (job.reasoning_effort) return `思考 ${job.reasoning_effort}`;
+  return job.thinking_enabled === false ? "思考关闭" : "默认思考强度";
 }
 function setMode(mode) {
   state.mode = mode;
@@ -162,7 +182,7 @@ function renderHistory() {
       element("strong", job.model),
       element(
         "small",
-        `${job.workers} 并发 / ${job.max_output_tokens} token 预算`,
+        `${job.workers} 并发 / ${reasoningLabel(job)} / ${job.max_output_tokens} token 预算`,
       ),
     );
     const status = element(
@@ -202,15 +222,28 @@ function renderJob(job) {
   $("job-badge").className = badge(job.status);
   $("job-model").textContent = job.model;
   $("job-meta").textContent =
-    `${job.task} / ${job.workers} 并发 / ${job.max_output_tokens} token 预算`;
+    `${job.task} / ${job.workers} 并发 / ${reasoningLabel(job)} / ${job.max_output_tokens} token 预算`;
   $("cancel-button").hidden =
     !running.has(job.status) || job.status === "CANCELLING";
   const rows = job.cases || [];
   const summary = job.summary;
+  $("api-scenarios").hidden = job.mode !== "api" || !summary;
+  $("scenario-rows").replaceChildren();
+  if (job.mode === "api" && summary) {
+    const labels = {short_answer: "短回答", long_answer: "长回答", long_context: "长上下文", structured_output: "JSON 输出", multi_turn: "多轮上下文", multilingual: "中英文混合"};
+    for (const [name, group] of Object.entries(summary.metrics?.scenarios || {})) {
+      const row = element("tr");
+      const latency = group.observed?.first_body_seconds;
+      const checks = group.output_checks;
+      for (const value of [labels[name] || name, `${group.successful} / ${group.attempted}`, latency?.p50 == null ? "—" : `${number(latency.p50)} s`, latency?.p95 == null ? "—" : `${number(latency.p95)} s`, String(group.truncated), checks?.checked ? `${checks.passed} / ${checks.checked}` : "—"])
+        row.append(element("td", value));
+      $("scenario-rows").append(row);
+    }
+  }
   const total =
     summary?.total_cases ??
     job.progress?.total_cases ??
-    (job.task === "quick40" ? 40 : job.mode === "api" ? 30 : 0);
+    (job.mode === "api" ? 60 : 0);
   const completed = rows.filter((row) => row.status !== "CANCELLED").length;
   $("progress-text").textContent =
     job.status === "QUEUED"
@@ -297,6 +330,9 @@ function renderJob(job) {
         : `参考 ${row.expected ?? "—"} / 回答 ${row.actual ?? "—"}`);
     if (row.metadata?.truncated || row.metadata?.experience?.truncated)
       detail = `输出被截断。${detail}`;
+    const check = row.metadata?.experience?.output_check;
+    if (check?.passed === false) detail = `流式请求完成；输出检查未通过（${check.kind}）。`;
+    else if (check?.passed === true) detail = "流式请求完成；输出检查通过。";
     tr.append(
       element("td", row.case_id),
       element("td", status),
@@ -362,6 +398,13 @@ async function initialize() {
   state.config = await (await api("/config")).json();
   $("base-url").value = state.config.base_url;
   $("model").value = state.config.model;
+  $("model-presets").replaceChildren();
+  for (const preset of state.config.reasoning_presets.models) {
+    const option = element("option", preset.provider);
+    option.value = preset.id;
+    $("model-presets").append(option);
+  }
+  configureReasoning();
   $("task").replaceChildren();
   for (const task of state.config.tasks) {
     const option = element(
@@ -424,10 +467,10 @@ $("evaluation-form").addEventListener("submit", async (event) => {
     api_key: $("api-key").value,
     workers: Number($("workers").value),
     max_output_tokens: Number($("token-budget").value),
-    thinking_enabled: $("thinking").checked,
+    thinking_enabled: $("reasoning-effort").value !== "none",
+    reasoning_effort: $("reasoning-effort").value || null,
     limit:
       state.mode === "benchmark" &&
-      $("task").value !== "quick40" &&
       $("limit").value
         ? Number($("limit").value)
         : null,
@@ -483,6 +526,7 @@ $("guest-entry").addEventListener("click", () =>
 );
 $("refresh-history").addEventListener("click", refresh);
 $("task").addEventListener("change", configureTask);
+$("model").addEventListener("input", configureReasoning);
 document
   .querySelectorAll("[data-mode]")
   .forEach((button) =>

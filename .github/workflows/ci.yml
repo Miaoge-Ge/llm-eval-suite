@@ -39,6 +39,7 @@ jobs:
           uv run --frozen mypy llm_eval
       - name: Offline regression
         run: |
+          node --test tests/web/reasoning_ui.test.cjs
           uv run --frozen python -c "from pathlib import Path; Path('.pytest_cache').mkdir(exist_ok=True)"
           uv run --frozen pytest --basetemp .pytest_cache/ci --junitxml=results/ci/tests.xml
       - name: Upload test results
@@ -51,7 +52,7 @@ jobs:
           if-no-files-found: warn
 
   docker:
-    name: Real Docker and full Quick40 grading
+    name: Real Docker and full Plus grading
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -73,7 +74,7 @@ jobs:
           LLM_EVAL_DOCKER_TESTS: "1"
         run: |
           uv run --frozen python -c "from pathlib import Path; Path('.pytest_cache').mkdir(exist_ok=True)"
-          uv run --frozen pytest tests/integration/test_docker_integration.py tests/integration/test_lightweight_suites.py::test_full_quick40_reference_run_resume_and_offline_grading --basetemp .pytest_cache/docker --junitxml=results/ci/docker.xml
+          uv run --frozen pytest tests/integration/test_docker_integration.py --basetemp .pytest_cache/docker --junitxml=results/ci/docker.xml
       - name: Build native production service
         run: |
           sudo apt-get update

@@ -21,8 +21,8 @@
 
 ```text
 llm_eval/
-  benchmark/          # benchmark tasks, grading, reports, Quick40
-  api_testing/        # streaming quality metrics, reports, fixed 30 requests
+  benchmark/          # benchmark tasks, grading, reports
+  api_testing/        # streaming quality metrics, reports, fixed 60 requests
   model_verification/ # planned; no identity verdicts yet
   core/               # clients, runners, execution, persistence
   web/                # authenticated web workbench
@@ -314,7 +314,7 @@ execution:
 
 ### GitHub Actions
 
-`CI` 在 push、PR 和手动触发时运行 Linux/Windows 回归、Ruff、mypy，以及真实 Docker 集成测试。普通 CI 不调用模型 API，固定 40 题的容器测试使用参考答案。
+`CI` 在 push、PR 和手动触发时运行 Linux/Windows 回归、Ruff、mypy，以及真实 Docker 集成测试。普通 CI 不调用模型 API，Plus 容器测试使用参考答案。
 
 `DeepSeek live evaluation` 仅手动触发，使用 `configs/deepseek.ci.yaml` 和仓库 Actions Secret `DEEPSEEK_API_KEY`：
 
@@ -322,7 +322,7 @@ execution:
 gh workflow run deepseek-live.yml --ref main
 ```
 
-它依次执行 `api-test`（30 次流式请求、10 并发、禁止重试）和 `quick-test`（固定 40 题、完整 Plus 测试、真实 Docker）。当前配置使用 `https://api.deepseek.com/v1` 的 `deepseek-flash`，显式启用思考，并将两种测试的输出预算均设为 16384 token（包含思考和正文）。首次真实运行证明较小的默认预算会在正文出现前耗尽，原失败记录保留在 Actions。题目及目标回答长度不变；比较渠道时必须使用相同预算。计时反映 GitHub 托管 runner 到服务端的网络环境。
+它通过 C++ 服务执行 API60（六个场景各 10 题、10 并发、禁止重试），再测试所选标准题库。工作流的 benchmark_task 和 benchmark_limit 可配置，默认 GSM8K 10 题。模型为 deepseek-flash，启用默认思考强度，输出预算 16384 token。
 
 工作流保留真实评分结果；模型答错不作为 CI 基础设施失败，API、运行及存储错误会导致工作流失败。即使计时步骤失败，也会继续尝试能力测试。报告展示在运行 Summary，原始响应、逐段计时和 JSON/Markdown 报告作为 artifact 保留 14 天。真实测试不会在 PR 上自动运行。
 
@@ -330,7 +330,7 @@ gh workflow run deepseek-live.yml --ref main
 
 ```bash
 uv run llm-eval api-test --config configs/deepseek.ci.yaml
-uv run llm-eval quick-test --config configs/deepseek.ci.yaml
+uv run llm-eval benchmark --task gsm --limit 10 --config configs/deepseek.ci.yaml
 ```
 
 ### 本地验证
@@ -353,6 +353,6 @@ uv run pytest tests/integration/test_docker_integration.py tests/integration/tes
 
 未启用时容器集成测试显示为跳过；模拟 Docker 调用的测试不能替代真实容器验证。
 
-`test_lightweight_suites.py` 同时覆盖固定题包、30 次请求的无重试统计，以及真实 Docker 下的 40 题参考答案评分、续跑和离线重评分。API 错误使用模拟 HTTP 服务注入，不消耗真实模型额度。
+`test_lightweight_suites.py` 覆盖 60 题清单、失败请求不重试、离线重算、取消和恢复。真实 Plus 容器评分由 Docker 与原生 HTTP 集成测试覆盖。
 
 Windows 沙箱的默认临时目录可能过长，导致文件读写报 `FileNotFoundError`。可为测试指定项目内的短目录，例如 `uv run pytest --basetemp .pytest_cache/run-tmp`。该目录仅存放测试临时文件，pytest 会清空它。

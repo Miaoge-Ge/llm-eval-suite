@@ -18,8 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="llm-eval", description="LLM benchmark performance and API service quality")
     subparsers = parser.add_subparsers(dest="command")
     for command, task, help_text in (
-        ("api-test", "api_experience", "30 streaming requests, configurable concurrency, no retries"),
-        ("quick-test", "quick40", "Fixed 40 original-language benchmark cases"),
+        ("api-test", "api_experience", "60 streaming requests, configurable concurrency, no retries"),
     ):
         sub = subparsers.add_parser(command, aliases=["api"] if command == "api-test" else [], help=help_text)
         sub.add_argument("--config", default="configs/model.yaml", help="Model config YAML")
@@ -118,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
             operation = (
                 resume_manifest["operation"]
                 if resume_manifest
-                else ("run" if args.command in {"api-test", "api", "quick-test", "benchmark"} else args.command)
+                else ("run" if args.command in {"api-test", "api", "benchmark"} else args.command)
             )
             runner = EvaluationRunner(config, operation=operation, resume_dir=resume_dir)
     except (OSError, ValueError, KeyError) as exc:
@@ -144,7 +143,7 @@ def _render_summary(summary: RunSummary, report_path: Path) -> str:
         metrics = summary.metrics.get("overall", {})
         return (
             f"API experience: {summary.run_status}\n"
-            f"Attempted: {metrics.get('attempted', 0)}/30; "
+            f"Attempted: {metrics.get('attempted', 0)}/{summary.total_cases}; "
             f"successful streams: {metrics.get('successful', 0)}; truncated: {metrics.get('truncated', 0)}\n"
             f"First-attempt success rate: {metrics.get('first_attempt_success_rate')}\n"
             f"Report: {report_path}"

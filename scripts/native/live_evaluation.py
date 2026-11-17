@@ -1,4 +1,4 @@
-"""Run the fixed real-model suites through the production C++ HTTP service."""
+"""Run API60 and a selected benchmark dataset through the production C++ HTTP service."""
 
 from __future__ import annotations
 
@@ -19,7 +19,11 @@ def main() -> int:
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("results/native-live"))
     parser.add_argument("--port", type=int, default=18081)
+    parser.add_argument("--task", default="gsm")
+    parser.add_argument("--limit", type=int, default=10)
     args = parser.parse_args()
+    if not 1 <= args.limit <= 5000:
+        parser.error("--limit must be between 1 and 5000")
     root = Path(__file__).resolve().parents[2]
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -51,12 +55,13 @@ def main() -> int:
                         raise RuntimeError("Native service exited before startup")
                     time.sleep(0.2)
                 client.post("/api/login", json={"password": password}).raise_for_status()
-                for mode, count in (("api", 30), ("benchmark", 40)):
+                for mode, count in (("api", 60), ("benchmark", args.limit)):
                     response = client.post(
                         "/api/jobs",
                         json={
                             "mode": mode,
-                            "task": "quick40",
+                            "task": args.task,
+                            "limit": args.limit if mode == "benchmark" else None,
                             "workers": 10,
                             "max_output_tokens": 16384,
                             "thinking_enabled": True,
@@ -93,7 +98,7 @@ def main() -> int:
                     )
                     if row["status"] != "COMPLETED" or summary.get("total_cases") != count:
                         failures += 1
-                    if mode == "api" and summary.get("api_attempts") != 30:
+                    if mode == "api" and summary.get("api_attempts") != 60:
                         failures += 1
         finally:
             process.terminate()

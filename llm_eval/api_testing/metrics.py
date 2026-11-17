@@ -132,15 +132,18 @@ def distribution(values: list[float]) -> dict[str, float | int | None]:
 
 
 def summarize_experience(results: list[dict[str, Any]], *, concurrency: int = 1) -> dict[str, Any]:
-    groups: dict[str, list[dict[str, Any]]] = {name: [] for name in ("short_answer", "long_answer", "long_context")}
+    groups: dict[str, list[dict[str, Any]]] = {}
     for result in results:
         meta = result.get("metadata", {})
-        if meta.get("scenario") in groups:
-            groups[meta["scenario"]].append(meta.get("experience", {}))
+        if meta.get("scenario"):
+            groups.setdefault(meta["scenario"], []).append(meta.get("experience", {}))
 
     def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         attempts = [row for row in rows if row.get("attempted")]
         successes = [row for row in attempts if row.get("success")]
+        checks = [
+            row["output_check"]["passed"] for row in attempts if row.get("output_check", {}).get("passed") is not None
+        ]
         latency_names = (
             "first_content_seconds",
             "first_body_seconds",
@@ -155,6 +158,11 @@ def summarize_experience(results: list[dict[str, Any]], *, concurrency: int = 1)
             "planned": len(rows),
             "attempted": len(attempts),
             "successful": len(successes),
+            "output_checks": {
+                "checked": len(checks),
+                "passed": sum(checks),
+                "pass_rate": sum(checks) / len(checks) if checks else None,
+            },
             "first_attempt_success_rate": len(successes) / len(attempts) if attempts else None,
             "truncated": sum(bool(row.get("truncated")) for row in attempts),
             "truncation_rate": sum(bool(row.get("truncated")) for row in attempts) / len(attempts)
@@ -183,7 +191,10 @@ def summarize_experience(results: list[dict[str, Any]], *, concurrency: int = 1)
         if type(row.get("request_concurrency")) is int
     }
     return {
-        "suite_version": "api-experience-v1",
+        "suite_version": next(
+            (r.get("metadata", {}).get("suite_version") for r in results if r.get("metadata", {}).get("suite_version")),
+            "api-experience-v1",
+        ),
         "concurrency": next(iter(recorded_concurrency)) if len(recorded_concurrency) == 1 else concurrency,
         "automatic_retries": 0,
         "scenarios": {name: aggregate(rows) for name, rows in groups.items()},

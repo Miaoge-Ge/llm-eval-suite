@@ -29,6 +29,9 @@ def main():
             ("short_answer", 128, 256),
             ("long_answer", 512, 768),
             ("long_context", 128, 256),
+            ("structured_output", 128, 256),
+            ("multi_turn", 128, 256),
+            ("multilingual", 128, 256),
         ]:
             system = "You are a helpful assistant. Follow the user's requested length and write in English."
             prompt = (
@@ -49,6 +52,35 @@ def main():
                         "Keep a copy of decisions and review unfinished work at the next meeting.\n"
                     )
             messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+            check = None
+            if scenario == "structured_output":
+                expected = {"case": index + 1, "topic": topic, "ready": True}
+                messages = [
+                    {"role": "system", "content": "Return a valid JSON object, without Markdown or commentary."},
+                    {"role": "user", "content": "Return exactly this JSON object: " + json.dumps(expected)},
+                ]
+                check = {"kind": "json_object", "expected": expected}
+            elif scenario == "multi_turn":
+                marker = f"PROJECT-{index + 1:02d}-FINAL"
+                messages = [
+                    {
+                        "role": "system",
+                        "content": "Follow the user's latest instruction. Return only the requested value.",
+                    },
+                    {"role": "user", "content": f"For {topic}, the project code is PROJECT-{index + 1:02d}-OLD."},
+                    {"role": "assistant", "content": "Understood. I will remember that project code."},
+                    {"role": "user", "content": f"Correction: replace the project code with {marker}."},
+                    {"role": "assistant", "content": "I have updated the project code."},
+                    {"role": "user", "content": "What is the updated project code? Return only that code."},
+                ]
+                check = {"kind": "exact_text", "expected": marker}
+            elif scenario == "multilingual":
+                marker = f"测试{index + 1:02d}：你好，世界！Hello world — café 🚀 / {topic}"
+                messages = [
+                    {"role": "system", "content": "Repeat the user's text exactly. Do not add quotes or commentary."},
+                    {"role": "user", "content": marker},
+                ]
+                check = {"kind": "exact_text", "expected": marker}
             cases.append(
                 {
                     "id": f"{scenario}/{index + 1:02d}",
@@ -57,12 +89,13 @@ def main():
                     "target_output_tokens": target,
                     "max_output_tokens": cap,
                     "reference_input_tokens": sum(len(encoding.encode(m["content"])) for m in messages),
+                    "output_check": check,
                 }
             )
     save(
-        destination / "api-experience-v1.json",
+        destination / "api-experience-v2.json",
         {
-            "version": "api-experience-v1",
+            "version": "api-experience-v2",
             "reference_tokenizer": "cl100k_base (content only; excludes chat framing)",
             "order": "interleaved scenarios, ten rounds; no warmup",
             "cases": cases,

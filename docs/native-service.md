@@ -37,6 +37,8 @@ Shutdown cancels queued and running work. Restart marks unfinished jobs interrup
 
 ## Verification
 
-CI builds the Release C++ binary with active test assertions, tests fragmented SSE and incomplete usage, and exercises the real HTTP service. Coverage includes anonymous ownership, cookie tampering, cross-origin rejection, credential-free scorer environments, cancellation, request/scorer limits, 100 simultaneous connections, exactly 30 attempts despite rate limits and stream interruptions, full Quick40 Docker grading and offline rescoring. LiveCodeBench private assets are tested separately on the deployment server because those assets are not committed.
+CI builds the Release C++ binary with active test assertions, tests fragmented SSE and incomplete usage, and exercises the real HTTP service. Coverage includes anonymous ownership, cookie tampering, cross-origin rejection, credential-free scorer environments, cancellation, request/scorer limits, 100 simultaneous connections, exactly 60 attempts despite rate limits and stream interruptions, full Plus Docker grading and offline rescoring. LiveCodeBench private assets are tested separately on the deployment server because those assets are not committed.
 
 Use [deployment instructions](deployment.md) for building, systemd, HTTPS and capacity configuration. See the dated performance/validation report for measured results and limits; language choice alone does not determine public network performance.
+
+Model-specific reasoning presets are exposed by `/api/config`. Explicit selections use the gateway `reasoning_effort` field only; `none` disables requested reasoning. Known model/level mismatches are rejected before a job is queued. The legacy default still sends `thinking.type=enabled`. See [API60 and reasoning settings](api-testing.md).

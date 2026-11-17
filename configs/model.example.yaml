@@ -32,15 +32,17 @@ execution:
 # Set to true to request reasoning/thinking from providers that support it.
 thinking_enabled: false
 
-# Optional: low | medium | high | max (only sent when thinking_enabled is true).
+# Optional gateway effort: none | low | medium | high | xhigh | max.
+# Non-none efforts require thinking_enabled: true; none explicitly disables thinking.
+# With an explicit effort, only reasoning_effort is sent (no vendor thinking flag).
 reasoning_effort:
 
 # Lightweight modes:
 #   uv run llm-eval api-test --config configs/my-model.yaml
-#   uv run llm-eval quick-test --config configs/my-model.yaml
-# Both honor workers in the config or --workers; API tests always disable retries.
+#   uv run llm-eval benchmark --task gsm --limit 10 --config configs/my-model.yaml
+# Both honor workers in the config or --workers; API60 always disables retries.
 # Without an explicit worker setting, fixed suites default to one worker.
-# quick-test defaults to 4096 output tokens. api-test uses scenario caps 256/768/256.
+# API60 uses scenario caps of 256 tokens (768 for long answers).
 # Optional override (use the same value for every channel in a comparison):
 # max_output_tokens: 4096
 # output_token_parameter: max_completion_tokens  # default: max_tokens

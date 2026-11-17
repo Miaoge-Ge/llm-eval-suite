@@ -6,7 +6,7 @@ Evaluate model capability and API service quality through OpenAI-compatible endp
 
 | Function | Status | Measures |
 | --- | --- | --- |
-| Benchmark | Available | Code, math, knowledge and instruction following; full datasets or fixed Quick40 |
+| Benchmark | Available | Code, math, knowledge and instruction following; standard datasets with optional case limits |
 | API testing | Available | First-attempt success, streaming latency, interruptions, truncation and observable throughput |
 | Model verification | Planned | Future comparisons against trusted references; no identity verdicts implemented |
 
@@ -22,11 +22,11 @@ cp configs/model.example.yaml configs/model.yaml
 # Set OPENAI_API_KEY and edit the endpoint/model in configs/model.yaml.
 docker pull python:3.12-slim
 docker build -t llm-eval-python:3.12-numpy2.2.6 -f docker/Dockerfile.numpy docker
-uv run llm-eval benchmark --task quick40 --config configs/model.yaml --workers 10
+uv run llm-eval benchmark --task gsm --limit 10 --config configs/model.yaml --workers 10
 uv run llm-eval api --config configs/model.yaml --workers 10
 ```
 
-PowerShell: use `Copy-Item` and `$env:OPENAI_API_KEY = 'your-key'`. Keep real keys out of committed YAML. Original commands `run`, `api-test` and `quick-test` remain supported.
+PowerShell: use `Copy-Item` and `$env:OPENAI_API_KEY = 'your-key'`. Keep real keys out of committed YAML. Original commands `run` and `api-test` remain supported.
 
 Full tasks: `humaneval`, `humanevalplus`, `mbpp`, `mbppplus`, `gsm`, `aime2025`, `aime2026`, `gpqa`, `mmlu_pro`, `ifeval`, `livecodebench`. LiveCodeBench requires separately downloaded private tests; see the [reference](docs/reference.md).
 
@@ -49,13 +49,15 @@ Open `http://127.0.0.1:8080`. Visitors enter without registering and supply thei
 
 Defaults: 20 running jobs, 40 model requests, four scoring processes, 200 active/queued jobs, and two active/queued jobs per visitor. Each job requests at most 10 workers. Shared resources may cause queueing; request scheduling delay is reported separately from API latency. A 4-core/4-GB host is not a promise of 100 independent CPU-heavy evaluations at once. Custom API keys remain in memory and never enter scoring processes. The administrator can use the protected server default key. Public deployments require HTTPS.
 
+The web form offers model-specific reasoning levels and sends the selected `reasoning_effort` unchanged to the OpenAI-compatible gateway. `none` requests disabled reasoning. Presets describe the configured model list, not verified gateway capabilities. See [API60 and reasoning settings](docs/api-testing.md).
+
 ## Measurement rules
 
-- **Quick40:** 10 original cases each for code, math, knowledge and instruction following. Source IDs, hashes and selection reasons are recorded. Fixed suites reject `--limit`; selected HumanEval+/MBPP+ cases retain every test.
-- **API:** 30 streaming requests across short answer, long answer and long context scenarios. One attempt per case, no automatic retry or resume. Original concurrency is preserved during offline grading.
+- **Benchmark:** select a standard dataset; Plus cases retain their full expanded tests.
+- **API60:** ten requests each for short answers, long answers, long context, JSON output, multi-turn context, and multilingual echo. One attempt per case, no retries or resume. Output checks are separate from stream success; original concurrency is preserved during offline grading.
 - **Timing:** first meaningful content includes reasoning; first body content does not. Per-chunk timestamps are preserved. TPS is estimated only when token usage and a valid body window are available; otherwise it is missing. Truncation is reported separately from transport success.
 - **Scoring:** API errors are separate from wrong answers. Reports include scoring coverage and errors alongside accuracy. Reasoning-only responses ending at the token limit are retained as truncated and not retried.
-- **Recovery:** benchmark runs support resume; both fixed suites support offline regrading without API access. Regrading creates new results and preserves the source run.
+- **Recovery:** benchmark runs support resume; benchmark and API runs support offline regrading without API access. Regrading creates new results and preserves the source run.
 
 ```bash
 uv run llm-eval grade --run-dir results/<model>/<task>/<run>
@@ -67,7 +69,7 @@ uv run llm-eval resume --run-dir results/<model>/<task>/<run> --config configs/m
 
 ```text
 llm_eval/
-  benchmark/          # tasks, grading, Quick40, benchmark reports
+  benchmark/          # tasks, grading, benchmark reports
   api_testing/        # API suite, streaming metrics, quality reports
   model_verification/ # roadmap only
   core/               # shared clients, runner, execution, storage
@@ -77,7 +79,7 @@ llm_eval/
   tasks.py            # public task registry
 server/               # C++20 HTTP, auth, queue, libcurl SSE and scorer pool
 datasets/benchmark/   # original benchmark data
-scripts/benchmark/    # dataset import / fixed suite construction
+scripts/benchmark/    # standard dataset import
 scripts/api_testing/  # API suite construction
 scripts/native/       # real-model validation through the C++ service
 tests/                # core, benchmark, API, integration, web
@@ -88,10 +90,10 @@ docs/                 # CLI and deployment reference
 
 ## CI and real API testing
 
-[2026-11-17 validation results](docs/validation-2026-11-17.md): API 30/30 successful; Quick40 39/40, with the remaining instruction-following failure retained.
+[Historical migration validation](docs/validation-native-2026-11-17.md) describes the previous release. See [API60 and reasoning settings](docs/api-testing.md) for the current rules.
 
 
-Ordinary CI runs Linux/Windows regression tests, Ruff, mypy and real Docker integration tests, a Release C++ build, and native HTTP failure/isolation tests without model credentials. Manually dispatch **DeepSeek live evaluation** with repository secret `DEEPSEEK_API_KEY` to run the C++ production service for 30 API requests followed by all 40 benchmark cases, both with **10 workers**.
+Ordinary CI runs Linux/Windows regression tests, Ruff, mypy and real Docker integration tests, a Release C++ build, and native HTTP failure/isolation tests without model credentials. Manually dispatch **DeepSeek live evaluation** with repository secret `DEEPSEEK_API_KEY` to run the C++ production service for 60 API requests followed by a selected standard dataset (GSM8K, 10 cases by default), both with **10 workers**.
 
 The DeepSeek profile explicitly enables thinking and uses a **16,384-token shared reasoning/body budget**. The first live run exhausted smaller budgets during reasoning; that failed run remains in Actions. Prompts and target answer lengths are unchanged. Comparisons must use the same settings; timings reflect the runner's network.
 

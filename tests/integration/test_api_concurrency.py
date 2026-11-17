@@ -44,9 +44,9 @@ def test_ten_workers_keep_exact_attempts_and_original_measurement_concurrency(fa
         lambda **kwargs: OpenAI(**kwargs, http_client=httpx.Client(transport=httpx.MockTransport(handler))),
     )
     summary, writer = EvaluationRunner(config).run()
-    assert calls == summary.api_attempts == 30 and peak == 10
+    assert calls == summary.api_attempts == 60 and peak == 10
     assert summary.metrics["concurrency"] == 10
-    assert summary.metrics["overall"]["successful"] == 28
+    assert summary.metrics["overall"]["successful"] == 58
     assert summary.metrics["overall"]["errors"] == {"rate_limit": 1, "incomplete_stream": 1}
     assert "Concurrency: **10**" in writer.paths.report_md.read_text(encoding="utf-8")
 
@@ -54,4 +54,4 @@ def test_ten_workers_keep_exact_attempts_and_original_measurement_concurrency(fa
     offline = replace(offline, run=replace(offline.run, workers=3))
     regraded, _ = EvaluationRunner(offline, operation="grade", source_dir=writer.paths.root).run()
     assert regraded.metrics == summary.metrics
-    assert regraded.new_api_attempts == 0 and calls == 30
+    assert regraded.new_api_attempts == 0 and calls == 60

@@ -15,6 +15,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, SecretStr
 
 from llm_eval.core.artifacts import write_json
+from llm_eval.core.reasoning import validate_reasoning
 from llm_eval.core.runner import EvaluationRunner
 from llm_eval.core.settings import (
     DEFAULT_DATASET_PATHS,
@@ -31,13 +32,14 @@ from llm_eval.core.utils import repo_root
 
 class JobRequest(BaseModel):
     mode: Literal["benchmark", "api"]
-    task: str = "quick40"
+    task: str = "gsm"
     base_url: str = "https://api.deepseek.com/v1"
     model: str = Field(default="deepseek-flash", min_length=1, max_length=200)
     api_key: SecretStr = SecretStr("")
     workers: int = Field(default=10, ge=1, le=10, strict=True)
     max_output_tokens: int = Field(default=16384, ge=1, le=65536, strict=True)
     thinking_enabled: bool = True
+    reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"] | None = None
     limit: int | None = Field(default=None, ge=1, le=5000, strict=True)
 
 
@@ -61,10 +63,11 @@ class JobManager:
                 continue
 
     def submit(self, request: JobRequest, api_key: str) -> dict[str, Any]:
+        thinking_enabled = validate_reasoning(request.model, request.reasoning_effort, request.thinking_enabled)
         task = "api_experience" if request.mode == "api" else request.task
         if task not in DEFAULT_DATASET_PATHS or (request.mode == "benchmark" and task == "api_experience"):
             raise ValueError("请选择有效的 Benchmark 题库。")
-        if task in {"quick40", "api_experience"} and request.limit is not None:
+        if task == "api_experience" and request.limit is not None:
             raise ValueError("固定题包必须完整运行，不能限制题量。")
         with self.lock:
             if sum(row["status"] in {"QUEUED", "RUNNING", "CANCELLING"} for row in self.records.values()) >= 5:
@@ -79,7 +82,8 @@ class JobManager:
                     workers=request.workers,
                     output_dir=directory / "runs",
                     max_output_tokens=request.max_output_tokens,
-                    thinking_enabled=request.thinking_enabled,
+                    thinking_enabled=thinking_enabled,
+                    reasoning_effort=request.reasoning_effort,
                     limit=request.limit,
                     execution=ExecutionConfig(image=NUMPY_IMAGE if task in PLUS_TASKS else "python:3.12-slim"),
                 ),
@@ -94,7 +98,8 @@ class JobManager:
                 "model": request.model,
                 "workers": request.workers,
                 "max_output_tokens": request.max_output_tokens,
-                "thinking_enabled": request.thinking_enabled,
+                "thinking_enabled": thinking_enabled,
+                "reasoning_effort": request.reasoning_effort,
                 "error": None,
             }
             self.records[job_id] = record

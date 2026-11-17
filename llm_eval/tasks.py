@@ -1,7 +1,6 @@
 """Public task registry; implementations live in their feature packages."""
 
 from .api_testing.task import ApiExperienceTask
-from .benchmark.quick import Quick40Task
 from .benchmark.tasks import (
     AIME2026Task,
     AIMETask,
@@ -38,6 +37,5 @@ __all__ = [
     "MMLUProTask",
     "IFEvalTask",
     "LiveCodeBenchTask",
-    "Quick40Task",
     "ApiExperienceTask",
 ]

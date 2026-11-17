@@ -1,5 +1,6 @@
 #include "engine.hpp"
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <sys/file.h>
 #include <fcntl.h>
@@ -10,7 +11,6 @@ namespace {
 bool active(const std::string& status) { return status == "QUEUED" || status == "RUNNING" || status == "CANCELLING"; }
 struct TaskInfo { const char* id; const char* label; const char* path; };
 constexpr TaskInfo catalog[] = {
-    {"quick40", "Quick40 · 固定 40 题", "llm_eval/benchmark/suites/quick40-v1.json"},
     {"humaneval", "HumanEval · 代码生成", "datasets/benchmark/HumanEval.jsonl"},
     {"humanevalplus", "HumanEval+ · 完整扩展测试", "datasets/benchmark/HumanEvalPlus.jsonl"},
     {"mbpp", "MBPP · Python 编程", "datasets/benchmark/MBPP.jsonl"},
@@ -49,7 +49,8 @@ fs::path existing_run(const fs::path& directory) {
     return {};
 }
 }
-Engine::Engine(const Config& config): config_(config), graders_(config) {
+Engine::Engine(const Config& config): config_(config),
+    reasoning_presets_(read_json(config.root / "llm_eval/core/reasoning_presets.json")), graders_(config) {
     fs::create_directories(config.state / "jobs");
     load();
     requests_ = std::make_unique<ThreadPool>(config.requests);
@@ -131,7 +132,7 @@ Json Engine::submit(Json input, std::string owner, std::string key) {
     Json spec;
     spec["mode"] = text(input, "mode", "benchmark", 16);
     if (spec["mode"] != "benchmark" && spec["mode"] != "api") throw std::invalid_argument("请选择有效评测功能。");
-    const auto task = spec["mode"] == "api" ? "api_experience" : text(input, "task", "quick40", 64);
+    const auto task = spec["mode"] == "api" ? "api_experience" : text(input, "task", "gsm", 64);
     const TaskInfo* selected = nullptr;
     for (const auto& item : catalog) if (task == item.id) selected = &item;
     if (task != "api_experience" && selected == nullptr) throw std::invalid_argument("请选择有效题库。");
@@ -140,19 +141,37 @@ Json Engine::submit(Json input, std::string owner, std::string key) {
     spec["model"] = text(input, "model", config_.model, 200);
     spec["workers"] = integer(input, "workers", 10, 10);
     spec["max_output_tokens"] = integer(input, "max_output_tokens", 16384, 65536);
-    spec["thinking_enabled"] = input.value("thinking_enabled", true);
     if (input.contains("thinking_enabled") && !input["thinking_enabled"].is_boolean())
         throw std::invalid_argument("思考模式必须为布尔值。");
+    spec["thinking_enabled"] = input.value("thinking_enabled", true);
+    spec["reasoning_effort"] = nullptr;
+    if (input.contains("reasoning_effort") && !input["reasoning_effort"].is_null()) {
+        const auto effort = text(input, "reasoning_effort", "", 16);
+        auto supported = reasoning_presets_["efforts"];
+        auto model = spec["model"].get<std::string>();
+        const auto slash = model.find_last_of('/');
+        if (slash != std::string::npos) model = model.substr(slash + 1);
+        const auto lower = [](std::string value) {
+            std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) { return std::tolower(ch); });
+            return value;
+        };
+        for (const auto& preset : reasoning_presets_["models"])
+            if (lower(preset["id"].get<std::string>()) == lower(model)) supported = preset["efforts"];
+        if (std::find(supported.begin(), supported.end(), effort) == supported.end())
+            throw std::invalid_argument("此模型的思考强度无效，请重新选择。");
+        spec["reasoning_effort"] = effort;
+        spec["thinking_enabled"] = effort != "none";
+    }
     spec["limit"] = input.contains("limit") && !input["limit"].is_null() ? Json(integer(input, "limit", 1, 5000)) : Json(nullptr);
-    if ((task == "quick40" || task == "api_experience") && !spec["limit"].is_null())
+    if (task == "api_experience" && !spec["limit"].is_null())
         throw std::invalid_argument("固定题包必须完整运行，不能限制题量。");
     const auto target = endpoint(spec["base_url"], owner != "admin");
     if (owner != "admin") resolve_public(target.host, target.port);
     if (key.empty() || key.size() > 4096 || key.find_first_of("\r\n") != std::string::npos)
         throw std::invalid_argument("请输入有效的模型 API 密钥。");
-    std::size_t count = task == "quick40" ? 40 : 30;
+    std::size_t count = 60;
     std::size_t assets = 0;
-    if (selected && task != "quick40") {
+    if (selected) {
         const auto dataset = read_file(config_.root / selected->path);
         count = static_cast<std::size_t>(std::count(dataset.begin(), dataset.end(), '\n'));
         assets = dataset.size() * 3;
@@ -188,7 +207,8 @@ Json Engine::submit(Json input, std::string owner, std::string key) {
     job->metadata = {{"id", id}, {"status", "QUEUED"}, {"created_at", epoch_seconds()},
                      {"mode", job->spec["mode"]}, {"task", task}, {"model", job->spec["model"]},
                      {"workers", job->spec["workers"]}, {"max_output_tokens", job->spec["max_output_tokens"]},
-                     {"thinking_enabled", job->spec["thinking_enabled"]}, {"runtime", "cpp"}, {"error", nullptr}};
+                     {"thinking_enabled", job->spec["thinking_enabled"]}, {"reasoning_effort", job->spec["reasoning_effort"]},
+                     {"runtime", "cpp"}, {"error", nullptr}};
     persist(*job); jobs_[id] = job;
     auto response = public_metadata(*job, false);
     jobs_pool_->submit([this, job] { run(job); });

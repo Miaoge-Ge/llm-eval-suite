@@ -17,7 +17,7 @@ def render_experience(summary: RunSummary, config: FrameworkConfig, results: lis
     metrics = summary.metrics
     overall = metrics.get("overall", {})
     lines = [
-        "# API experience — 30 requests",
+        f"# API experience — {summary.total_cases} requests",
         "",
         f"Model: `{summary.model}`; endpoint: `{config.model.base_url}`.",
         f"Status: **{summary.run_status}**; stop reason: {summary.error or 'none'}.",
@@ -25,7 +25,8 @@ def render_experience(summary: RunSummary, config: FrameworkConfig, results: lis
         f"Temperature: {config.run.temperature}; seed: {config.run.seed}; timeout: {config.model.timeout_seconds}s.",
         f"Concurrency: **{metrics.get('concurrency', config.run.workers)}**; "
         "automatic retries: **0**; warmup: **none**.",
-        f"Attempted/planned: {overall.get('attempted', 0)}/30; successful streams: {overall.get('successful', 0)}; "
+        f"Attempted/planned: {overall.get('attempted', 0)}/{summary.total_cases}; "
+        f"successful streams: {overall.get('successful', 0)}; "
         f"truncated: {overall.get('truncated', 0)}.",
         "",
         "Success means a nonempty answer with a stream finish marker; it does not measure answer correctness. "
@@ -42,14 +43,19 @@ def render_experience(summary: RunSummary, config: FrameworkConfig, results: lis
         "Latency rows include observed partial failures; missing events have no latency value. "
         "summary.json also contains success-only distributions and each distribution's sample count.",
         "",
-        "| Scenario | Attempted | Successful | First-attempt success | Truncated | Stalls | SLO pass |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "Output checks cover JSON validity and values, multi-turn recall, and Unicode echo. They are separate "
+        "from transport success and can also fail because of model instruction following. Failed or truncated "
+        "streams have no completed output check. A JSON-mode rejection remains an API error; no fallback is attempted.",
+        "",
+        "| Scenario | Attempted | Successful | First-attempt success | Truncated | Stalls | SLO pass | Output checks |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for name, group in metrics.get("scenarios", {}).items():
         lines.append(
-            f"| {name} | {group['attempted']}/10 | {group['successful']} | "
+            f"| {name} | {group['attempted']}/{group['planned']} | {group['successful']} | "
             f"{display(group['first_attempt_success_rate'])} | {group['truncated']} | "
-            f"{group['stalls']} | {display(group['slo_pass_rate'])} |"
+            f"{group['stalls']} | {display(group['slo_pass_rate'])} | "
+            f"{group.get('output_checks', {}).get('passed', 0)}/{group.get('output_checks', {}).get('checked', 0)} |"
         )
     lines += ["", "| Scenario | Metric | n | P10 | P50 | P95 | Max |", "| --- | --- | --- | --- | --- | --- | --- |"]
     for name, group in metrics.get("scenarios", {}).items():

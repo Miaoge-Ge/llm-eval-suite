@@ -18,7 +18,7 @@ async def run(args):
     async with httpx.AsyncClient(base_url=args.url, timeout=20, limits=limits, trust_env=not args.direct) as client:
         (await client.post("/api/login", json={"password": os.environ["LLM_EVAL_ADMIN_PASSWORD"]})).raise_for_status()
         jobs = (await client.get("/api/jobs")).json()
-        job = next(row for row in jobs if row.get("task") == "quick40" and row["status"] == "COMPLETED")
+        job = next(row for row in jobs if row.get("mode") == "benchmark" and row["status"] == "COMPLETED")
         for users in (10, 50, 100):
             samples = []
             started = time.perf_counter()

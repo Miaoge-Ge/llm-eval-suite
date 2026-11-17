@@ -105,7 +105,6 @@ def test_task_registry_auto_registers_all_tasks():
         "mmlu_pro",
         "ifeval",
         "livecodebench",
-        "quick40",
         "api_experience",
     }
     assert expected == set(TASK_REGISTRY)

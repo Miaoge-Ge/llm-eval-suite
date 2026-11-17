@@ -21,8 +21,8 @@ A clean, engineering-first evaluation framework for LLM benchmarks. It uses `uv`
 
 ```text
 llm_eval/
-  benchmark/          # benchmark tasks, grading, reports, Quick40
-  api_testing/        # streaming quality metrics, reports, fixed 30 requests
+  benchmark/          # benchmark tasks, grading, reports
+  api_testing/        # streaming quality metrics, reports, fixed 60 requests
   model_verification/ # planned; no identity verdicts yet
   core/               # clients, runners, execution, persistence
   web/                # authenticated web workbench
@@ -308,7 +308,7 @@ Ctrl+C stops scheduling, execution, and retries, attempts to close active model 
 
 ### GitHub Actions
 
-`CI` runs Linux/Windows regression, Ruff, mypy, and real Docker integration on pushes, pull requests, and manual dispatch. Regular CI does not call model APIs; its full Quick40 container test uses reference answers.
+`CI` runs Linux/Windows regression, Ruff, mypy, and real Docker integration on pushes, pull requests, and manual dispatch. Regular CI does not call model APIs; its Plus container tests use reference answers.
 
 `DeepSeek live evaluation` is manually dispatched and uses `configs/deepseek.ci.yaml` with the `DEEPSEEK_API_KEY` repository Actions secret:
 
@@ -316,22 +316,22 @@ Ctrl+C stops scheduling, execution, and retries, attempts to close active model 
 gh workflow run deepseek-live.yml --ref main
 ```
 
-It runs `api-test` (30 streaming requests, 10 workers, no retries), followed by `quick-test` (all 40 cases, full Plus tests in real Docker). The profile selects `deepseek-flash` at `https://api.deepseek.com/v1` with thinking explicitly enabled and a 16384-token budget shared by reasoning and visible output in both suites. The initial live run exhausted the smaller suite defaults before producing body text; that failed run remains in Actions. Prompts and target answer lengths are unchanged; channel comparisons must use the same budget. Timing reflects the GitHub-hosted runner's network path.
+The C++ service runs API60 (six scenarios, ten cases each, ten workers, no retries), followed by the selected standard dataset. Configure benchmark_task and benchmark_limit in the workflow; defaults are GSM8K and ten cases. The model is deepseek-flash with default thinking and a 16384-token output budget.
 
-Wrong model answers remain benchmark outcomes; API, execution, and storage errors fail the workflow. Quick40 is still attempted if the API experience step fails. Reports appear in the run Summary; raw responses, chunk timelines, and JSON/Markdown reports are uploaded as artifacts for 14 days. Live evaluation never runs automatically on pull requests.
+Wrong model answers remain benchmark outcomes; API, execution, and storage errors fail the workflow. The selected benchmark is still attempted if the API experience step fails. Reports appear in the run Summary; raw responses, chunk timelines, and JSON/Markdown reports are uploaded as artifacts for 14 days. Live evaluation never runs automatically on pull requests.
 
 For local evaluation, set `DEEPSEEK_API_KEY` and run:
 
 ```bash
 uv run llm-eval api-test --config configs/deepseek.ci.yaml
-uv run llm-eval quick-test --config configs/deepseek.ci.yaml
+uv run llm-eval benchmark --task gsm --limit 10 --config configs/deepseek.ci.yaml
 ```
 
 ### Local validation
 
 Tests do not call live model APIs. Real container tests are opt-in after preparing Docker and its image: set `LLM_EVAL_DOCKER_TESTS=1`, then run `uv run pytest tests/integration/test_docker_integration.py tests/integration/test_lightweight_suites.py`. They are skipped otherwise; mocked Docker tests are not a substitute for container validation.
 
-The lightweight suite tests cover fixed selection, retry-free accounting for 30 API requests, and all 40 reference answers graded in real Docker, including resume and offline regrading. API failures are injected through a mock HTTP transport.
+The API suite tests cover 60 fixed cases, single-attempt accounting, cancellation, and offline regrading. Native and Docker integration tests exercise complete Plus grading. API failures are injected through a mock HTTP transport.
 
 Windows sandbox temporary paths can exceed the filesystem path limit and produce `FileNotFoundError`. Use a short project-local test directory, for example `uv run pytest --basetemp .pytest_cache/run-tmp`. Reserve that directory for test scratch files: pytest clears it.
 

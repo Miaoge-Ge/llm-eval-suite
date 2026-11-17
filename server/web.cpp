@@ -159,6 +159,7 @@ void configure_web(httplib::Server& server, Engine& engine, const Config& config
     server.Get("/api/config", checked([&engine, &config](const auto& request, auto& response) {
         const auto identity = owner(request, config);
         json_response(response, {{"tasks", engine.tasks()}, {"base_url", config.base_url}, {"model", config.model},
+                                  {"reasoning_presets", engine.reasoning_presets()},
                                   {"role", identity == "admin" ? "admin" : "guest"}, {"runtime", "cpp"},
                                   {"server_key_available", identity == "admin" && !config.default_key.empty()},
                                   {"max_workers", 10}, {"model_verification", "planned"}});

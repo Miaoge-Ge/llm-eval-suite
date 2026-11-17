@@ -37,6 +37,7 @@ public:
     fs::path artifacts(const std::shared_ptr<Job>& job);
     Json capacity();
     Json tasks() const;
+    const Json& reasoning_presets() const { return reasoning_presets_; }
     void shutdown();
 private:
     void run(const std::shared_ptr<Job>& job);
@@ -44,6 +45,7 @@ private:
     Json public_metadata(const Job& job, bool summary) const;
     void load();
     const Config& config_;
+    Json reasoning_presets_;
     GraderPool graders_;
     std::unique_ptr<ThreadPool> requests_;
     std::unique_ptr<ThreadPool> grades_;

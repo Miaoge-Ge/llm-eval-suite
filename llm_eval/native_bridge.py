@@ -85,7 +85,7 @@ def context(root: Path) -> tuple[FrameworkConfig, BaseEvaluationTask, list[TaskC
 def prepare(root: Path, spec: dict[str, Any]) -> dict[str, Any]:
     task_name = "api_experience" if spec["mode"] == "api" else spec["task"]
     limit = spec.get("limit")
-    if task_name not in TASK_REGISTRY or (task_name in {"quick40", "api_experience"} and limit is not None):
+    if task_name not in TASK_REGISTRY or (task_name == "api_experience" and limit is not None):
         raise ValueError("Invalid task or fixed-suite limit")
     config = FrameworkConfig(
         model=ModelConfig("native-no-api-key", spec["base_url"], spec["model"], spec.get("timeout_seconds", 120)),
@@ -97,6 +97,7 @@ def prepare(root: Path, spec: dict[str, Any]) -> dict[str, Any]:
             execution=ExecutionConfig(image=NUMPY_IMAGE if task_name in PLUS_TASKS else "python:3.12-slim"),
             max_output_tokens=spec["max_output_tokens"],
             thinking_enabled=spec["thinking_enabled"],
+            reasoning_effort=spec.get("reasoning_effort"),
             limit=limit,
         ),
         model_config_path=root / "native-request",

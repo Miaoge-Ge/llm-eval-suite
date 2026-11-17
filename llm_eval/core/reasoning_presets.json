@@ -1,0 +1,12 @@
+{
+  "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
+  "models": [
+    {"provider": "DeepSeek", "id": "deepseek-v4.1-flash", "efforts": ["none", "low", "high", "max"]},
+    {"provider": "DeepSeek", "id": "deepseek-v4-pro", "efforts": ["none", "low", "high", "max"]},
+    {"provider": "Qwen", "id": "qwen3.8-flash", "efforts": ["none", "low", "medium", "xhigh"]},
+    {"provider": "GLM", "id": "glm-5.3-flash", "efforts": ["low", "high", "max"]},
+    {"provider": "Mimo", "id": "mimo-v2.6-flash", "efforts": ["none", "low", "high"]},
+    {"provider": "Mimo", "id": "mimo-v2.6-pro", "efforts": ["none", "low", "high"]},
+    {"provider": "MiniMax", "id": "MiniMax-M3.1-Flash", "efforts": ["low", "medium", "high", "xhigh", "max"]}
+  ]
+}

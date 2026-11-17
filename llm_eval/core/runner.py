@@ -32,12 +32,12 @@ class EvaluationRunner:
         if operation not in {"run", "generate", "grade"}:
             raise ValueError(f"Unsupported operation: {operation}")
         self.config = config
-        if config.run.task in {"quick40", "api_experience"} and config.run.limit is not None:
+        if config.run.task == "api_experience" and config.run.limit is not None:
             raise ValueError("Fixed suites do not support --limit; use an individual source task for subsets")
         if config.run.task == "api_experience":
             if resume_dir:
                 raise ValueError(
-                    "API timing sessions cannot be resumed; start a new 30-request session or grade offline"
+                    "API timing sessions cannot be resumed; start a new 60-request session or grade offline"
                 )
             if operation == "generate":
                 raise ValueError("Use api-test to capture and report API experience in one session")

@@ -21,13 +21,12 @@ DEFAULT_DATASET_PATHS = {
     "mmlu_pro": Path("datasets/benchmark/MMLUPro.jsonl"),
     "ifeval": Path("datasets/benchmark/IFEval.jsonl"),
     "livecodebench": Path("datasets/benchmark/LiveCodeBench.jsonl"),
-    "quick40": Path("llm_eval/benchmark/suites/quick40-v1.json"),
-    "api_experience": Path("llm_eval/api_testing/suites/api-experience-v1.json"),
+    "api_experience": Path("llm_eval/api_testing/suites/api-experience-v2.json"),
 }
 
 NUMPY_VERSION = "2.2.6"
 NUMPY_IMAGE = "llm-eval-python:3.12-numpy2.2.6"
-PLUS_TASKS = ("humanevalplus", "mbppplus", "quick40")
+PLUS_TASKS = ("humanevalplus", "mbppplus")
 
 
 @dataclass(frozen=True)
@@ -101,6 +100,8 @@ class RunConfig:
     def __post_init__(self) -> None:
         if type(self.workers) is not int or self.workers <= 0:
             raise ValueError("workers must be a positive integer")
+        if self.reasoning_effort == "none":
+            object.__setattr__(self, "thinking_enabled", False)
         if self.output_token_parameter not in ("max_tokens", "max_completion_tokens"):
             raise ValueError("output_token_parameter must be max_tokens or max_completion_tokens")
         if self.stall_threshold_seconds is None:
@@ -127,6 +128,8 @@ class RunConfig:
 
     @property
     def reasoning_display(self) -> str:
+        if self.reasoning_effort == "none":
+            return "none"
         return self.reasoning_effort or "default" if self.thinking_enabled else "disabled"
 
 
@@ -178,14 +181,14 @@ def load_framework_config(
         task=task_name,
         workers=workers
         if workers is not None
-        else model_data.get("workers", 1 if task_name in {"quick40", "api_experience"} else 10),
+        else model_data.get("workers", 1 if task_name == "api_experience" else 10),
         output_dir=(root / "results" / slugify(model.model_name)).resolve(),
         execution_timeout_seconds=max(1, int(model_data.get("execution_timeout_seconds", 20))),
         thinking_enabled=parse_bool(model_data.get("thinking_enabled", False), default=False),
         reasoning_effort=_optional_text(model_data.get("reasoning_effort")),
         limit=max(1, int(limit)) if limit is not None else None,
         execution=execution,
-        max_output_tokens=model_data.get("max_output_tokens", 4096 if task_name == "quick40" else None),
+        max_output_tokens=model_data.get("max_output_tokens"),
         output_token_parameter=model_data.get("output_token_parameter", "max_tokens"),
         temperature=model_data.get("temperature"),
         seed=model_data.get("seed"),

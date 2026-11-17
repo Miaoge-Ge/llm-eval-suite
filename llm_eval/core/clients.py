@@ -43,10 +43,12 @@ def request_parameters(config: FrameworkConfig) -> dict[str, Any]:
         "stream": True,
         "stream_options": {"include_usage": True},
     }
-    if config.run.thinking_enabled:
+    if config.run.reasoning_effort == "none" or (config.run.thinking_enabled and config.run.reasoning_effort):
+        # A gateway maps the standard field to its provider-specific controls.
+        # Do not send a second, potentially conflicting vendor thinking flag.
+        parameters["reasoning_effort"] = config.run.reasoning_effort
+    elif config.run.thinking_enabled:
         parameters["extra_body"] = {"thinking": {"type": "enabled"}}
-        if config.run.reasoning_effort:
-            parameters["reasoning_effort"] = config.run.reasoning_effort
     if config.run.max_output_tokens is not None:
         parameters[config.run.output_token_parameter] = config.run.max_output_tokens
     if config.run.temperature is not None:

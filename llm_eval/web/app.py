@@ -20,6 +20,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, SecretStr
 
+from llm_eval.core.reasoning import reasoning_presets
 from llm_eval.core.settings import DEFAULT_DATASET_PATHS
 from llm_eval.core.utils import repo_root
 from llm_eval.web.jobs import JobManager, JobRequest
@@ -141,7 +142,6 @@ def create_app(settings: WebSettings | None = None, manager: JobManager | None =
     @api.get("/config")
     def configuration():
         labels = {
-            "quick40": "Quick40 · 固定 40 题",
             "humaneval": "HumanEval · 代码生成",
             "humanevalplus": "HumanEval+ · 完整扩展测试",
             "mbpp": "MBPP · Python 编程",
@@ -165,6 +165,7 @@ def create_app(settings: WebSettings | None = None, manager: JobManager | None =
             "tasks": tasks,
             "base_url": settings.default_base_url,
             "model": settings.default_model,
+            "reasoning_presets": reasoning_presets(),
             "server_key_available": bool(settings.default_api_key),
             "max_workers": 10,
             "model_verification": "planned",

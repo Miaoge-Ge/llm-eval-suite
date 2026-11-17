@@ -78,6 +78,7 @@ def service(tmp_path):
 def provider():
     class Mock(BaseHTTPRequestHandler):
         count = 0
+        requests = []
         mode = "failures"
         answers = {}
         default_answer = "hello world"
@@ -90,6 +91,7 @@ def provider():
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             with Mock.lock:
                 Mock.count += 1
+                Mock.requests.append(body)
                 number = Mock.count
             if (Mock.mode == "failures" and number % 3 == 0) or (Mock.mode == "retry" and number == 1):
                 self.send_response(429)
@@ -232,16 +234,18 @@ def test_one_hundred_connections_do_not_pin_idle_http_workers(service):
         list(pool.map(visit, range(100)))
 
 
-def test_thirty_failures_are_not_hidden_by_retries(service, provider):
+def test_sixty_failures_are_not_hidden_by_retries(service, provider):
     _, admin, state, _ = service
     url, mock = provider
     job_id = submit(admin, url)
     row = wait_job(admin, job_id)
     assert "summary" in row, row
-    assert mock.count == row["summary"]["api_attempts"] == 30
-    assert len(row["cases"]) == 30
+    assert mock.count == row["summary"]["api_attempts"] == 60
+    assert len(row["cases"]) == 60
+    assert len(row["summary"]["metrics"]["scenarios"]) == 6
+    assert sum("response_format" in body for body in mock.requests) == 10
     records = list((state / "jobs" / job_id).glob("runs/*/*/generations/*/*.json"))
-    assert len(records) == 30
+    assert len(records) == 60
     for path in records:
         generation = json.loads(path.read_text())["generation"]
         assert generation["attempts"] == 1
@@ -259,7 +263,7 @@ def test_reasoning_only_truncation_has_no_retries_or_invented_tps(service, provi
     url, mock = provider
     mock.mode = "reasoning_only"
     row = wait_job(admin, submit(admin, url))
-    assert row["summary"]["api_attempts"] == mock.count == 30
+    assert row["summary"]["api_attempts"] == mock.count == 60
     for case in row["cases"]:
         metrics = case["metadata"]["experience"]
         assert metrics["truncated"] is True
@@ -301,9 +305,9 @@ def test_parallel_jobs_observe_global_request_and_grader_limits(service, provide
     mock.mode = "reference"
     ids = [submit(admin, url), submit(admin, url)]
     for identifier in ids:
-        assert wait_job(admin, identifier)["summary"]["api_attempts"] == 30
+        assert wait_job(admin, identifier)["summary"]["api_attempts"] == 60
     capacity = admin.get("/api/admin/capacity").json()
-    assert mock.count == 60
+    assert mock.count == 120
     assert capacity["requests"]["peak"] <= 4
     assert capacity["graders"]["peak"] <= 2
 
@@ -379,26 +383,32 @@ def test_native_livecodebench_private_tests(service, provider):
 
 
 @pytest.mark.skipif(os.getenv("LLM_EVAL_DOCKER_TESTS") != "1", reason="Requires real Docker")
-def test_native_full_quick40_and_offline_regrade(service, provider, fake_config):
-    import runpy
+@pytest.mark.parametrize("task_name", ["humanevalplus", "mbppplus"])
+def test_native_full_plus_tests_and_offline_regrade(service, provider, fake_config, task_name):
     from dataclasses import replace
 
     from llm_eval.cli import main
-    from llm_eval.core.settings import NUMPY_IMAGE, ExecutionConfig
-    from llm_eval.tasks import Quick40Task
-
-    helpers = runpy.run_path(str(repo_root() / "tests/integration/test_lightweight_suites.py"))
-    reference_answer, suite_config = helpers["reference_answer"], helpers["suite_config"]
+    from llm_eval.core.settings import DEFAULT_DATASET_PATHS, NUMPY_IMAGE, DatasetConfig, ExecutionConfig
+    from llm_eval.tasks import TASK_REGISTRY
 
     _, admin, state, _ = service
     url, mock = provider
-    config = suite_config(fake_config, "quick40")
-    config = replace(config, run=replace(config.run, execution=ExecutionConfig(image=NUMPY_IMAGE)))
-    task = Quick40Task(config)
+    config = replace(
+        fake_config,
+        dataset=DatasetConfig(task_name, repo_root() / DEFAULT_DATASET_PATHS[task_name]),
+        run=replace(fake_config.run, task=task_name, execution=ExecutionConfig(image=NUMPY_IMAGE)),
+    )
+    task = TASK_REGISTRY[task_name](config)
+    case = task.load_cases()[0]
+    if task_name == "humanevalplus":
+        answer = case.payload["prompt"] + case.payload["canonical_solution"]
+    else:
+        assert case.payload["entry_point"] == "similar_elements"
+        answer = "def similar_elements(a, b):\n    return tuple(set(a) & set(b))"
+    # The complete source test is passed through to the Docker grader.
+    assert len(case.payload["test"]) > 1000
     mock.mode = "reference"
-    mock.answers = {
-        json.dumps(task.build_messages(case), sort_keys=True): reference_answer(case) for case in task.load_cases()
-    }
+    mock.answers = {json.dumps(task.build_messages(case), sort_keys=True): answer}
     response = admin.post(
         "/api/jobs",
         json={
@@ -406,7 +416,8 @@ def test_native_full_quick40_and_offline_regrade(service, provider, fake_config)
             "api_key": "test-only-key",
             "model": "mock",
             "mode": "benchmark",
-            "task": "quick40",
+            "task": task_name,
+            "limit": 1,
             "workers": 10,
         },
     )
@@ -414,8 +425,59 @@ def test_native_full_quick40_and_offline_regrade(service, provider, fake_config)
     job_id = response.json()["id"]
     row = wait_job(admin, job_id, 300)
     assert row["status"] == "COMPLETED", row
-    assert row["summary"]["status_counts"] == {"PASSED": 40}
-    assert mock.count == 40
-    root = state / "jobs" / job_id / "runs" / "quick40" / "native"
+    assert row["summary"]["status_counts"] == {"PASSED": 1}
+    assert mock.count == 1
+    root = state / "jobs" / job_id / "runs" / task_name / "native"
     assert main(["grade", "--run-dir", str(root), "--output-dir", str(root.parent / "regrade")]) == 0
-    assert mock.count == 40
+    assert mock.count == 1
+
+
+def test_reasoning_presets_reach_provider_and_saved_reports(service, provider):
+    _, admin, state, _ = service
+    url, mock = provider
+    mock.mode = "reference"
+    presets = admin.get("/api/config").json()["reasoning_presets"]
+    assert len(presets["models"]) == 7
+    assert all(t["id"] != "quick40" for t in admin.get("/api/config").json()["tasks"])
+    for preset in presets["models"]:
+        for effort in preset["efforts"]:
+            response = admin.post(
+                "/api/jobs",
+                json={
+                    "mode": "benchmark",
+                    "task": "gsm",
+                    "limit": 1,
+                    "base_url": url,
+                    "api_key": "test",
+                    "model": preset["id"],
+                    "reasoning_effort": effort,
+                },
+            )
+            assert response.status_code == 202, response.text
+            identifier = response.json()["id"]
+            row = wait_job(admin, identifier)
+            assert row["status"] == "COMPLETED", row
+            assert row["reasoning_effort"] == effort
+            assert row["thinking_enabled"] is (effort != "none")
+            body = mock.requests[-1]
+            assert body["reasoning_effort"] == effort and "thinking" not in body
+            run = state / "jobs" / identifier / "runs" / "gsm" / "native"
+            saved = json.loads((run / "config.json").read_text())
+            assert saved["run"]["reasoning_effort"] == effort
+            assert f"| Reasoning effort | `{effort}` |" in admin.get(f"/api/jobs/{identifier}/report").text
+    before = mock.count
+    for model, effort in (("glm-5.3-flash", "none"), ("qwen3.8-flash", "max"), ("custom", 1), ("custom", "invalid")):
+        assert (
+            admin.post(
+                "/api/jobs",
+                json={"mode": "api", "base_url": url, "api_key": "test", "model": model, "reasoning_effort": effort},
+            ).status_code
+            == 422
+        )
+    assert (
+        admin.post(
+            "/api/jobs", json={"mode": "benchmark", "task": "quick40", "base_url": url, "api_key": "test"}
+        ).status_code
+        == 422
+    )
+    assert mock.count == before

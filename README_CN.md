@@ -6,7 +6,7 @@
 
 | 功能 | 状态 | 用途 |
 | --- | --- | --- |
-| Benchmark 测试 | 已实现 | 代码、数学、知识、指令遵循；完整题库与固定 Quick40 |
+| Benchmark 测试 | 已实现 | 代码、数学、知识、指令遵循；标准题库，可设置题量 |
 | API 测试 | 已实现 | 首试成功率、流式延迟、中断、截断、可观测吞吐 |
 | 模型验证 | 待开发 | 未来与可信参考模型比较；当前不生成模型真伪结论 |
 
@@ -22,11 +22,11 @@ cp configs/model.example.yaml configs/model.yaml
 # 设置 OPENAI_API_KEY，并修改配置中的模型名和接口地址。
 docker pull python:3.12-slim
 docker build -t llm-eval-python:3.12-numpy2.2.6 -f docker/Dockerfile.numpy docker
-uv run llm-eval benchmark --task quick40 --config configs/model.yaml --workers 10
+uv run llm-eval benchmark --task gsm --limit 10 --config configs/model.yaml --workers 10
 uv run llm-eval api --config configs/model.yaml --workers 10
 ```
 
-PowerShell 使用 `Copy-Item` 复制文件，用 `$env:OPENAI_API_KEY = '你的密钥'` 设置环境变量。真实密钥不要写入提交到 Git 的配置。兼容原有 `run`、`api-test`、`quick-test` 命令。
+PowerShell 使用 `Copy-Item` 复制文件，用 `$env:OPENAI_API_KEY = '你的密钥'` 设置环境变量。真实密钥不要写入提交到 Git 的配置。兼容原有 `run`、`api-test` 命令。
 
 完整题库包括 HumanEval/Plus、MBPP/Plus、GSM8K、AIME 2025/2026、GPQA、MMLU-Pro、IFEval、LiveCodeBench。LiveCodeBench 私有测试需要额外下载，见 [CLI 参考](docs/reference_CN.md)。
 
@@ -49,13 +49,15 @@ uv run --extra web llm-eval-web
 
 默认最多 20 个运行任务、40 个模型请求、4 个评分进程、200 个运行及排队任务；每位访客最多 2 个运行及排队任务，每任务最多 10 workers。资源共享时会排队，调度等待与 API 延迟分别记录。4 核 / 4 GB 主机不能保证 100 个 CPU 密集评测同时独占资源。密钥仅在内存中使用，不传入评分进程。公网部署使用 HTTPS。
 
+网页支持按模型联动选择思考强度，并把 `reasoning_effort` 原样发送给 OpenAI 兼容中转；`none` 请求关闭思考。预设来自指定模型清单，不能证明中转已支持或执行该参数。详见[API60 与思考强度](docs/api-testing.md)。
+
 ## 评测规则
 
-- **Quick40**：四个维度各 10 题，保留原题、来源 ID、内容哈希和选题理由。不能用 `--limit` 缩减固定题包；选中 Plus 题目的扩展测试完整执行。
-- **API**：短回答、长回答、长上下文各 10 次流式请求。每题请求一次，不自动重试，不支持续跑。并发设置存入原始记录，离线重算保留原测量并发。
+- **Benchmark**：直接选择标准题库；Plus 题目的扩展测试完整执行。
+- **API60**：短回答、长回答、长上下文、JSON 输出、多轮上下文、中英文混合各 10 次。每题只请求一次，不重试、不续跑；输出检查与流式成功率分开统计。
 - **计时**：首段有效内容可为思考内容，首段正文单独记录；保留逐段时间戳。仅在 token 用量和正文时间窗口可靠时估算 TPS，否则显示缺失。传输成功与截断分别报告。
 - **评分**：接口错误与答错分开；准确率同时报告评分覆盖率和错误数。只有思考内容、因 token 上限结束的回答保留截断标记，不再重复请求。
-- **恢复**：Benchmark 支持续跑；两个固定题包均支持无 API 调用的离线重评分，结果另存，原始运行保留。
+- **恢复**：Benchmark 支持续跑；Benchmark 和 API 测试均支持无 API 调用的离线重评分，结果另存，原始运行保留。
 
 ```bash
 uv run llm-eval grade --run-dir results/<model>/<task>/<run>
@@ -67,7 +69,7 @@ uv run llm-eval resume --run-dir results/<model>/<task>/<run> --config configs/m
 
 ```text
 llm_eval/
-  benchmark/          # 能力任务、评分、Quick40、报告
+  benchmark/          # 能力任务、评分、报告
   api_testing/        # API 固定题包、流式指标、质量报告
   model_verification/ # 规划说明，尚未实现
   core/               # 共用客户端、调度、执行、存储
@@ -77,7 +79,7 @@ llm_eval/
   tasks.py            # 公开任务注册表
 server/               # C++20 HTTP、会话、调度、流式请求、评分池
 datasets/benchmark/   # 原始 benchmark 数据
-scripts/benchmark/    # 导入题库、构建固定题包
+scripts/benchmark/    # 导入标准题库
 scripts/api_testing/  # 构建 API 题包
 scripts/native/       # 经 C++ 服务进行真实模型验证
 tests/                # 按功能分类，另含集成与网页测试
@@ -88,10 +90,10 @@ docs/                 # CLI、部署参考
 
 ## GitHub CI 与真实测试
 
-[2026-11-17 验证结果](docs/validation-2026-11-17.md)：API 30/30 成功，Quick40 39/40，保留真实的指令遵循失败。
+[历史迁移验证](docs/validation-native-2026-11-17.md)记录了旧版本实测；当前 API60 规则与思考强度见[配置说明](docs/api-testing.md)。
 
 
-普通 CI 包括 Linux/Windows 回归、Ruff、mypy、真实 Docker、C++ Release 构建及原生 HTTP 权限/失败统计测试，不调用模型。手动运行 **DeepSeek live evaluation** 工作流时，从 Secret `DEEPSEEK_API_KEY` 读取密钥，通过 C++ 生产服务先跑 30 次 API 测试，再跑全部 40 道能力题，两者均为 **10 workers**。
+普通 CI 包括 Linux/Windows 回归、Ruff、mypy、真实 Docker、C++ Release 构建及原生 HTTP 权限/失败统计测试，不调用模型。手动运行 **DeepSeek live evaluation** 工作流时，从 Secret `DEEPSEEK_API_KEY` 读取密钥，通过 C++ 生产服务先跑 60 次 API 测试，再跑所选标准题库（默认 GSM8K 10 题），两者均为 **10 workers**。
 
 DeepSeek 配置显式启用思考，思考与正文共享 **16,384 token** 输出预算。首轮实测因预算过小，在思考阶段耗尽额度，失败记录保留在 Actions 中。增加预算不改变原题及要求回答的长度；横向对比需要使用同一设置。计时反映运行机器的网络条件。
 

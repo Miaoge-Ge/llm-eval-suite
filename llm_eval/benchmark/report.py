@@ -104,26 +104,6 @@ def render_benchmark(
                 "**Incomplete test coverage: the pass rate includes public-only samples and must not be "
                 "reported as a full-test benchmark score.**"
             )
-    if summary.task == "quick40":
-        lines.extend(
-            [
-                "",
-                "### Fixed 40-case coverage sample",
-                "",
-                "Original-language questions; ten per dimension. This is not a calibrated benchmark or "
-                "a general model ranking. Each case changes its dimension count by one out of ten. "
-                "IFEval checks explicit constraints, not subjective writing quality. "
-                "Errors and cancellations are not silently counted as wrong answers.",
-                "",
-                "| Dimension | Passed / planned | Graded | Errors | Cancelled | Truncated |",
-                "| --- | --- | --- | --- | --- | --- |",
-            ]
-        )
-        for name, stats in summary.metrics.get("dimensions", {}).items():
-            lines.append(
-                f"| {name} | {stats['passed']}/{stats['planned']} | {stats['graded']} | "
-                f"{stats['errors']} | {stats['cancelled']} | {stats['truncated']} |"
-            )
     domain_rows = _domain_breakdown(results)
     if domain_rows:
         lines.extend(
