@@ -25,6 +25,10 @@ body {
   min-height: 100vh;
   display: grid;
   place-items: center;
+  align-content: center;
+  gap: 16px;
+  padding: 24px;
+  text-align: center;
   color: var(--muted);
 }
 button,
@@ -766,101 +770,6 @@ pre {
     Consolas,
     monospace;
 }
-.login-view {
-  min-height: 100vh;
-  position: relative;
-  display: flex;
-  align-items: center;
-  padding: 10vh 11vw;
-  overflow: hidden;
-  background: #f6f8fc;
-}
-.login-brand {
-  position: absolute;
-  top: 40px;
-  left: 5vw;
-  display: flex;
-  gap: 13px;
-  align-items: center;
-  font-size: 21px;
-  font-weight: 600;
-}
-.login-form {
-  max-width: 400px;
-  width: 100%;
-  position: relative;
-  z-index: 2;
-}
-.login-note {
-  color: var(--blue);
-  font-size: 12px;
-  margin-bottom: 18px;
-}
-.login-form h1 {
-  font-size: 35px;
-  line-height: 1.5;
-  margin-bottom: 20px;
-}
-.login-form > .muted {
-  margin-bottom: 36px;
-}
-.login-form label {
-  margin-top: 24px;
-}
-.login-form .primary {
-  margin-top: 22px;
-}
-.login-foot {
-  font-size: 11px;
-  color: var(--muted);
-  margin: 20px 0 0;
-}
-.login-art {
-  position: absolute;
-  inset: 0 0 0 53%;
-  background: #e5ecfa;
-  overflow: hidden;
-}
-.login-art > span {
-  position: absolute;
-  left: 18%;
-  bottom: 15%;
-  font-size: 14px;
-  letter-spacing: 4px;
-  color: #6c80a8;
-}
-.wave {
-  position: absolute;
-  border: 1px solid #a9bae0;
-  border-radius: 50%;
-  width: 730px;
-  height: 730px;
-  left: 10%;
-  top: 5%;
-  box-shadow:
-    0 0 0 35px #e5ecfa,
-    0 0 0 36px #c7d3ed,
-    0 0 0 70px #e5ecfa,
-    0 0 0 71px #c7d3ed;
-}
-.wave-b {
-  width: 440px;
-  height: 440px;
-  left: 26%;
-  top: 23%;
-  border-width: 30px;
-  border-color: #b5c5ec;
-  box-shadow: none;
-}
-.wave-c {
-  width: 135px;
-  height: 135px;
-  top: 44%;
-  left: 43%;
-  border-width: 0;
-  background: #6685cc;
-  box-shadow: 0 0 0 42px #d3def5;
-}
 @media (min-width: 1600px) {
   .evaluation-layout {
     grid-template-columns: 365px minmax(0, 1fr);
@@ -1018,18 +927,6 @@ pre {
   .empty-results h3 {
     font-size: 15px;
   }
-  .login-art {
-    left: 65%;
-  }
-  .login-view {
-    padding-left: 8vw;
-  }
-  .login-form {
-    max-width: 43vw;
-  }
-  .login-form h1 {
-    font-size: 28px;
-  }
 }
 @media (max-width: 650px) {
   .evaluation-layout {
@@ -1102,22 +999,6 @@ pre {
   }
   .verification-diagram {
     gap: 15px;
-  }
-  .login-art {
-    display: none;
-  }
-  .login-view {
-    padding: 120px 28px 60px;
-  }
-  .login-brand {
-    left: 28px;
-    top: 30px;
-  }
-  .login-form {
-    max-width: 100%;
-  }
-  .login-form h1 {
-    font-size: 30px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -47,11 +47,12 @@ function element(tag, text, className = "") {
   el.className = className;
   return el;
 }
-function showLogin() {
+function showEntryError() {
   state.sessionVersion++;
-  $("entry-status").hidden = true;
+  $("entry-status").hidden = false;
   $("workspace").hidden = true;
-  $("login-view").hidden = false;
+  $("entry-message").textContent = "暂时无法连接工作区，请检查网络并允许本站使用 Cookie 后重试。";
+  $("retry-entry").hidden = false;
   $("api-key").value = "";
   clearTimeout(state.timer);
 }
@@ -63,7 +64,7 @@ async function api(path, options = {}) {
   });
   if (!response.ok && response.status !== 304) {
     const data = await response.json().catch(() => ({}));
-    if (response.status === 401 && path !== "/login") showLogin();
+    if (response.status === 401) showEntryError();
     throw new Error(
       typeof data.detail === "string"
         ? data.detail
@@ -425,6 +426,8 @@ async function refresh(force = false) {
 async function initialize() {
   state.sessionVersion++;
   clearTimeout(state.timer);
+  $("retry-entry").hidden = true;
+  $("entry-message").textContent = "正在打开免注册工作区…";
   $("report-dialog").close();
   $("report-content").textContent = "";
   await api("/session", { method: "POST" });
@@ -452,8 +455,6 @@ async function initialize() {
     option.disabled = !task.available;
     $("task").append(option);
   }
-  $("logout").textContent =
-    state.config.role === "admin" ? "退出管理" : "管理入口";
   $("key-optional").textContent = "必填";
   $("api-key").required = !state.config.server_key_available;
   $("api-key").placeholder = "填写你自己的模型 API 密钥";
@@ -464,31 +465,12 @@ async function initialize() {
     $("key-help").textContent =
       "服务器密钥仅用于默认 API 地址；自定义密钥不写入评测记录。";
   }
-  $("login-view").hidden = true;
   $("entry-status").hidden = true;
   $("workspace").hidden = false;
   configureTask();
   setMode(state.mode);
   await refresh(true);
 }
-$("login-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  $("login-error").textContent = "";
-  const button = event.currentTarget.querySelector("button");
-  button.disabled = true;
-  try {
-    await api("/login", {
-      method: "POST",
-      body: JSON.stringify({ password: $("login-password").value }),
-    });
-    $("login-password").value = "";
-    await initialize();
-  } catch (error) {
-    $("login-error").textContent = error.message;
-  } finally {
-    button.disabled = false;
-  }
-});
 $("evaluation-form").addEventListener("submit", async (event) => {
   const version = state.sessionVersion;
   event.preventDefault();
@@ -548,19 +530,7 @@ $("show-report").addEventListener("click", async () => {
   }
 });
 $("close-report").addEventListener("click", () => $("report-dialog").close());
-$("logout").addEventListener("click", async () => {
-  if (state.config.role !== "admin") {
-    showLogin();
-    return;
-  }
-  await api("/logout", { method: "POST" });
-  await initialize();
-});
-$("guest-entry").addEventListener("click", () =>
-  initialize().catch((error) => {
-    $("login-error").textContent = error.message;
-  }),
-);
+$("retry-entry").addEventListener("click", () => initialize().catch(showEntryError));
 $("refresh-history").addEventListener("click", refresh);
 $("task").addEventListener("change", configureTask);
 $("limit").addEventListener("input", configureTask);
@@ -572,4 +542,4 @@ document
   );
 for (let i = 0; i < 40; i++)
   document.querySelector(".sample-grid").append(element("i"));
-initialize().catch(() => showLogin());
+initialize().catch(showEntryError);

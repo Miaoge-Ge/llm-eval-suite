@@ -10,46 +10,9 @@
   </head>
   <body>
     <div id="entry-status" class="entry-status" role="status">
-      正在打开免注册工作区…
+      <p id="entry-message">正在打开免注册工作区…</p>
+      <button id="retry-entry" class="secondary" type="button" hidden>重新连接</button>
     </div>
-    <section id="login-view" class="login-view" hidden>
-      <div class="login-brand">
-        <span class="brand-glyph" aria-hidden="true">∿</span
-        ><span>LLM Eval Suite</span>
-      </div>
-      <form id="login-form" class="login-form">
-        <p class="login-note">管理员入口</p>
-        <h1>管理你的评测服务。</h1>
-        <p class="muted">
-          Benchmark 性能与 API 服务质量，在同一个地方测量、比较和复查。
-        </p>
-        <label for="login-password">访问密码</label>
-        <input
-          id="login-password"
-          type="password"
-          autocomplete="current-password"
-          required
-          autofocus
-        />
-        <p id="login-error" class="error-message" role="alert"></p>
-        <button class="primary" type="submit">
-          管理员登录 <span aria-hidden="true">↗</span>
-        </button>
-        <button id="guest-entry" class="quiet" type="button">
-          返回免注册工作台
-        </button>
-        <p class="login-foot">
-          日常评测无需注册或登录；管理员可使用服务器默认密钥。
-        </p>
-      </form>
-      <div class="login-art" aria-hidden="true">
-        <div class="wave wave-a"></div>
-        <div class="wave wave-b"></div>
-        <div class="wave wave-c"></div>
-        <span>从答案到证据</span>
-      </div>
-    </section>
-
     <div id="workspace" class="workspace" hidden>
       <aside class="sidebar">
         <a class="brand" href="/"
@@ -80,7 +43,7 @@
           <div>
             <span class="connection"
               ><span class="status-dot"></span>已连接</span
-            ><button id="logout" class="quiet">退出</button>
+            >
           </div>
         </header>
         <div class="page">

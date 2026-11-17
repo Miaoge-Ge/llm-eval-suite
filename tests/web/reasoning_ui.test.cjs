@@ -25,7 +25,7 @@ function harness() {
     setTimeout, clearTimeout, performance, console,
   });
   const source = fs.readFileSync(path.join(root, "llm_eval/web/static/app.js"), "utf8")
-    .replace("initialize().catch(() => showLogin());", "");
+    .replace("initialize().catch(showEntryError);", "");
   vm.runInContext(source, context);
   context.presets = presets;
   vm.runInContext("state.config = {reasoning_presets: presets};", context);
