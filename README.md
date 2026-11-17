@@ -77,6 +77,9 @@ docs/                 # CLI and deployment reference
 
 ## CI and real API testing
 
+[2026-11-17 validation results](docs/validation-2026-11-17.md): API 30/30 successful; Quick40 39/40, with the remaining instruction-following failure retained.
+
+
 Ordinary CI runs Linux/Windows regression tests, Ruff, mypy and real Docker integration tests without model credentials. Manually dispatch **DeepSeek live evaluation** with repository secret `DEEPSEEK_API_KEY` to run 30 API requests followed by all 40 benchmark cases, both with **10 workers**.
 
 The DeepSeek profile explicitly enables thinking and uses a **16,384-token shared reasoning/body budget**. The first live run exhausted smaller budgets during reasoning; that failed run remains in Actions. Prompts and target answer lengths are unchanged. Comparisons must use the same settings; timings reflect the runner's network.

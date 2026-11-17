@@ -77,6 +77,9 @@ docs/                 # CLI、部署参考
 
 ## GitHub CI 与真实测试
 
+[2026-11-17 验证结果](docs/validation-2026-11-17.md)：API 30/30 成功，Quick40 39/40，保留真实的指令遵循失败。
+
+
 普通 CI 包括 Linux/Windows 回归、Ruff、mypy、真实 Docker 测试，不调用模型。手动运行 **DeepSeek live evaluation** 工作流时，从 Secret `DEEPSEEK_API_KEY` 读取密钥，先跑 30 次 API 测试，再跑全部 40 道能力题，两者均为 **10 workers**。
 
 DeepSeek 配置显式启用思考，思考与正文共享 **16,384 token** 输出预算。首轮实测因预算过小，在思考阶段耗尽额度，失败记录保留在 Actions 中。增加预算不改变原题及要求回答的长度；横向对比需要使用同一设置。计时反映运行机器的网络条件。
