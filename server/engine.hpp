@@ -46,6 +46,7 @@ private:
     void load();
     const Config& config_;
     Json reasoning_presets_;
+    Json tasks_;
     GraderPool graders_;
     std::unique_ptr<ThreadPool> requests_;
     std::unique_ptr<ThreadPool> grades_;

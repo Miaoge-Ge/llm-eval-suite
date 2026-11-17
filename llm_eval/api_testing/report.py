@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from llm_eval.api_testing.metrics import summarize_tokens
+
 if TYPE_CHECKING:
     from llm_eval.core.reporting import RunSummary
     from llm_eval.core.settings import FrameworkConfig
@@ -16,6 +18,13 @@ def display(value: Any) -> str:
 def render_experience(summary: RunSummary, config: FrameworkConfig, results: list[dict[str, Any]]) -> str:
     metrics = summary.metrics
     overall = metrics.get("overall", {})
+    usage = overall.get("token_usage") or summarize_tokens(
+        [
+            row["metadata"]["experience"]
+            for row in results
+            if row.get("metadata", {}).get("experience", {}).get("attempted")
+        ]
+    )
     lines = [
         f"# API experience — {summary.total_cases} requests",
         "",
@@ -36,6 +45,25 @@ def render_experience(summary: RunSummary, config: FrameworkConfig, results: lis
         "On the shared web service, scheduler_wait_seconds measures waiting for an HTTP worker before "
         "the request starts. It is reported separately from API latency; shared_request_limit is the "
         "service-wide cap, while request_concurrency is this job's requested maximum.",
+        "",
+        "## Token usage",
+        "",
+        "Provider-reported usage includes observed failed and truncated requests. Output includes reasoning tokens "
+        "when the provider counts them there; reasoning and cached tokens are not added a second time. "
+        "Missing usage is unknown, not zero. A total is derived from input + output only when both are known. "
+        "Partial totals cover only requests with reported usage and are not a billing estimate.",
+        "",
+        "| Usage | Tokens observed | Requests with usage | Requests missing usage |",
+        "| --- | --- | --- | --- |",
+        *[
+            f"| {label} | {display(usage[field]['tokens'])} | {usage[field]['reported_requests']} | "
+            f"{usage[field]['missing_requests']} |"
+            for field, label in (
+                ("prompt_tokens", "Input"),
+                ("completion_tokens", "Output (including reported reasoning)"),
+                ("total_tokens", "Total"),
+            )
+        ],
         "",
         "## Scenario metrics",
         "",

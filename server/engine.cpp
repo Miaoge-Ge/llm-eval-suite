@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <sstream>
 #include <sys/file.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -23,6 +24,24 @@ constexpr TaskInfo catalog[] = {
     {"ifeval", "IFEval · 指令遵循", "datasets/benchmark/IFEval.jsonl"},
     {"livecodebench", "LiveCodeBench · 编程竞赛", "datasets/benchmark/LiveCodeBench.jsonl"}
 };
+std::size_t count_records(std::istream& input) {
+    std::size_t count = 0;
+    for (std::string line; std::getline(input, line);)
+        if (line.find_first_not_of(" \t\r\n") != std::string::npos) ++count;
+    return count;
+}
+Json task_catalog(const fs::path& root) {
+    Json result = Json::array();
+    for (const auto& task : catalog) {
+        std::ifstream input(root / task.path);
+        Json count = input ? Json(count_records(input)) : Json(nullptr);
+        bool ready = !count.is_null() && count.get<std::size_t>() > 0;
+        if (std::string(task.id) == "livecodebench")
+            ready = ready && fs::is_directory(root / "datasets/benchmark/LiveCodeBench.private");
+        result.push_back({{"id", task.id}, {"label", task.label}, {"available", ready}, {"total_cases", count}});
+    }
+    return result;
+}
 int integer(const Json& source, const char* field, int fallback, int maximum) {
     if (!source.contains(field)) return fallback;
     if (!source[field].is_number_integer() || source[field].is_boolean()) throw std::invalid_argument("Invalid integer parameter");
@@ -50,7 +69,8 @@ fs::path existing_run(const fs::path& directory) {
 }
 }
 Engine::Engine(const Config& config): config_(config),
-    reasoning_presets_(read_json(config.root / "llm_eval/core/reasoning_presets.json")), graders_(config) {
+    reasoning_presets_(read_json(config.root / "llm_eval/core/reasoning_presets.json")),
+    tasks_(task_catalog(config.root)), graders_(config) {
     fs::create_directories(config.state / "jobs");
     load();
     requests_ = std::make_unique<ThreadPool>(config.requests);
@@ -118,14 +138,7 @@ Json Engine::public_metadata(const Job& job, bool summary) const {
     return result;
 }
 Json Engine::tasks() const {
-    Json result = Json::array();
-    for (const auto& task : catalog) {
-        bool ready = fs::is_regular_file(config_.root / task.path);
-        if (std::string(task.id) == "livecodebench")
-            ready = ready && fs::is_directory(config_.root / "datasets/benchmark/LiveCodeBench.private");
-        result.push_back({{"id", task.id}, {"label", task.label}, {"available", ready}});
-    }
-    return result;
+    return tasks_;
 }
 Json Engine::submit(Json input, std::string owner, std::string key) {
     if (!input.is_object()) throw std::invalid_argument("请求参数必须为对象。");
@@ -173,7 +186,8 @@ Json Engine::submit(Json input, std::string owner, std::string key) {
     std::size_t assets = 0;
     if (selected) {
         const auto dataset = read_file(config_.root / selected->path);
-        count = static_cast<std::size_t>(std::count(dataset.begin(), dataset.end(), '\n'));
+        std::istringstream records(dataset);
+        count = count_records(records);
         assets = dataset.size() * 3;
     }
     if (!spec["limit"].is_null()) count = std::min(count, spec["limit"].get<std::size_t>());
@@ -208,7 +222,7 @@ Json Engine::submit(Json input, std::string owner, std::string key) {
                      {"mode", job->spec["mode"]}, {"task", task}, {"model", job->spec["model"]},
                      {"workers", job->spec["workers"]}, {"max_output_tokens", job->spec["max_output_tokens"]},
                      {"thinking_enabled", job->spec["thinking_enabled"]}, {"reasoning_effort", job->spec["reasoning_effort"]},
-                     {"runtime", "cpp"}, {"error", nullptr}};
+                     {"runtime", "cpp"}, {"total_cases", count}, {"error", nullptr}};
     persist(*job); jobs_[id] = job;
     auto response = public_metadata(*job, false);
     jobs_pool_->submit([this, job] { run(job); });

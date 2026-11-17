@@ -100,7 +100,43 @@ function metric(label, value, note) {
 }
 function configureTask() {
   $("limit-field").hidden = false;
-  $("suite-help").textContent = "使用题库原题和完整评分逻辑，可设置题量上限。";
+  const task = state.config?.tasks?.find((item) => item.id === $("task").value);
+  const total = task?.total_cases;
+  const limit = $("limit").value === "" ? null : Number($("limit").value);
+  const valid = limit === null || (Number.isInteger(limit) && limit >= 1 && limit <= 5000);
+  const planned = total == null ? null : Math.min(total, limit ?? total);
+  $("suite-help").textContent = total == null
+    ? "题库数量暂不可用。"
+    : `题库共 ${total.toLocaleString()} 题；${valid ? `本次计划 ${planned.toLocaleString()} 题` : "请输入 1–5000 的整数题量上限"}。` +
+      (task.available ? "使用原题和完整评分，Plus 题内扩展测试全部保留。" : "题库尚未准备完成，暂不可运行。");
+}
+function taskLabel(task) {
+  return `${task.label} · ${task.total_cases == null ? "题量未知" : task.total_cases.toLocaleString() + " 题"}` +
+    (task.available ? "" : "（题库待准备）");
+}
+function tokenUsage(rows) {
+  const attempts = rows.map((row) => row.metadata?.experience).filter((row) => row?.attempted);
+  const count = (value) => Number.isInteger(value) && value >= 0 ? value : null;
+  return Object.fromEntries(["prompt_tokens", "completion_tokens", "total_tokens"].map((field) => {
+    const values = attempts.map((row) => {
+      const value = count(row[field]);
+      if (field !== "total_tokens" || value !== null) return value;
+      const input = count(row.prompt_tokens), output = count(row.completion_tokens);
+      return input === null || output === null ? null : input + output;
+    }).filter((value) => value !== null);
+    return [field, {tokens: values.length ? values.reduce((sum, value) => sum + value, 0) : null,
+      reported_requests: values.length, missing_requests: attempts.length - values.length}];
+  }));
+}
+function renderTokenUsage(rows, summary, status) {
+  const usage = summary?.metrics?.overall?.token_usage || tokenUsage(rows);
+  for (const [field, label] of [["prompt_tokens", "输入 tokens"], ["completion_tokens", "输出 tokens"], ["total_tokens", "总 tokens 消耗"]]) {
+    const item = usage[field];
+    const missing = item?.missing_requests ?? 0;
+    const note = `${item?.reported_requests ?? 0} 次请求有用量${missing ? `，${missing} 次缺失（部分统计）` : ""}`;
+    $("metrics").append(metric(label, item?.tokens == null ? "—" : item.tokens.toLocaleString(),
+      `${note}；${running.has(status) ? "随已返回结果更新" : field === "completion_tokens" ? "含上游计入的思考 tokens" : "按上游返回用量统计"}`));
+  }
 }
 function configureReasoning() {
   const catalog = state.config.reasoning_presets;
@@ -290,6 +326,7 @@ function renderJob(job) {
         `估算值 / 截断 ${overall?.truncated ?? 0} 次`,
       ),
     );
+    renderTokenUsage(rows, summary, job.status);
   } else {
     const passed = rows.filter((row) => row.status === "PASSED").length;
     const scored = rows.filter((row) => graded.has(row.status)).length;
@@ -409,7 +446,7 @@ async function initialize() {
   for (const task of state.config.tasks) {
     const option = element(
       "option",
-      task.label + (task.available ? "" : "（题库待准备）"),
+      taskLabel(task),
     );
     option.value = task.id;
     option.disabled = !task.available;
@@ -526,6 +563,7 @@ $("guest-entry").addEventListener("click", () =>
 );
 $("refresh-history").addEventListener("click", refresh);
 $("task").addEventListener("change", configureTask);
+$("limit").addEventListener("input", configureTask);
 $("model").addEventListener("input", configureReasoning);
 document
   .querySelectorAll("[data-mode]")

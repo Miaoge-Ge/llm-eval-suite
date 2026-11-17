@@ -36,6 +36,8 @@ def test_authentication_protects_jobs_and_downloads(client):
     login(client)
     assert client.get("/api/jobs").json() == []
     assert client.get("/api/config").json()["model_verification"] == "planned"
+    tasks = client.get("/api/config").json()["tasks"]
+    assert next(task for task in tasks if task["id"] == "humaneval")["total_cases"] == 164
     assert "server-secret-api-key" not in client.get("/api/config").text
     client.post("/api/logout")
     assert client.get("/api/jobs").status_code == 401

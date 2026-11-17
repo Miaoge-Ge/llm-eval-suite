@@ -188,6 +188,15 @@ def test_anonymous_sessions_security_and_admin_isolation(service, provider):
 
 def test_restored_guest_ownership_and_interrupted_restart(service):
     base, admin, _, process = service
+    from llm_eval.core.settings import DEFAULT_DATASET_PATHS
+
+    for task in admin.get("/api/config").json()["tasks"]:
+        path = repo_root() / DEFAULT_DATASET_PATHS[task["id"]]
+        if path.is_file():
+            with path.open(encoding="utf-8") as dataset:
+                assert task["total_cases"] == sum(bool(line.strip()) for line in dataset)
+        else:
+            assert task["total_cases"] is None and not task["available"]
     tokens = []
     for digit in ("1", "2"):
         payload = f"{int(time.time()) + 3600}.{digit * 32}.{'a' * 32}"
@@ -243,6 +252,10 @@ def test_sixty_failures_are_not_hidden_by_retries(service, provider):
     assert mock.count == row["summary"]["api_attempts"] == 60
     assert len(row["cases"]) == 60
     assert len(row["summary"]["metrics"]["scenarios"]) == 6
+    usage = row["summary"]["metrics"]["overall"]["token_usage"]
+    assert usage["total_tokens"]["tokens"] == row["summary"]["token_usage"]["total_tokens"]
+    assert usage["total_tokens"]["missing_requests"] > 0
+    assert "## Token usage" in admin.get(f"/api/jobs/{job_id}/report").text
     assert sum("response_format" in body for body in mock.requests) == 10
     records = list((state / "jobs" / job_id).glob("runs/*/*/generations/*/*.json"))
     assert len(records) == 60

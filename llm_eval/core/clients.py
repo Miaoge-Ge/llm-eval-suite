@@ -150,7 +150,7 @@ class OpenAICompatibleClient:
             finally:
                 # Keep usage already received even when stream consumption raises.
                 _merge_usage(total_usage, attempt_usage)
-                if stream_started and not attempt_usage:
+                if stream_started and not all(field in attempt_usage for field in total_usage):
                     usage_complete = False
                 partial_content = "".join(parts)
                 if timeline is not None:
@@ -207,13 +207,10 @@ class OpenAICompatibleClient:
             if getattr(chunk, "model", None):
                 metadata["response_model"] = chunk.model
             if getattr(chunk, "usage", None):
-                usage.update(
-                    {
-                        "prompt_tokens": chunk.usage.prompt_tokens or 0,
-                        "completion_tokens": chunk.usage.completion_tokens or 0,
-                        "total_tokens": chunk.usage.total_tokens or 0,
-                    }
-                )
+                for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                    value = getattr(chunk.usage, field, None)
+                    if type(value) is int and value >= 0:
+                        usage[field] = value
                 details = getattr(chunk.usage, "completion_tokens_details", None)
                 reasoning_tokens = getattr(details, "reasoning_tokens", None)
                 if type(reasoning_tokens) is int:

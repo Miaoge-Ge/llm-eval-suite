@@ -113,6 +113,13 @@ def test_success_without_usage_is_marked_incomplete(client_factory):
     assert result.usage["total_tokens"] == 0
 
 
+def test_partial_usage_does_not_invent_zero_tokens(client_factory):
+    data = sse().replace(b'"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12', b'"prompt_tokens": 5')
+    result = client_factory(lambda request: httpx.Response(200, content=data)).generate([], max_attempts=1)
+    assert result.attempt_records[0]["usage"] == {"prompt_tokens": 5}
+    assert not result.usage_complete
+
+
 def test_fatal_error_keeps_usage_from_previous_attempt(client_factory):
     calls = []
 

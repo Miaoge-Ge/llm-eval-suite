@@ -95,3 +95,40 @@ def test_partial_failure_and_truncation_are_not_hidden_by_latency_or_slo():
 def test_percentiles_and_empty_samples():
     assert distribution([]) == {"n": 0, "p10": None, "p50": None, "p95": None, "max": None}
     assert distribution([1, 3, float("nan")])["p95"] == pytest.approx(2.9)
+
+
+def test_token_totals_include_failed_and_truncated_requests_without_inventing_missing_usage():
+    rows = [
+        {"attempted": True, "success": True, "prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+        {"attempted": True, "success": False, "prompt_tokens": 5, "completion_tokens": 0},
+        {"attempted": True, "success": True, "truncated": True, "completion_tokens": 7},
+        {"attempted": True},
+        {"attempted": False},
+    ]
+    metrics = summarize_experience([{"metadata": {"scenario": "short_answer", "experience": row}} for row in rows])
+    usage = metrics["overall"]["token_usage"]
+    assert usage["prompt_tokens"] == {"tokens": 15, "reported_requests": 2, "missing_requests": 2}
+    assert usage["completion_tokens"] == {"tokens": 27, "reported_requests": 3, "missing_requests": 1}
+    assert usage["total_tokens"] == {"tokens": 35, "reported_requests": 2, "missing_requests": 2}
+    assert metrics["scenarios"]["short_answer"]["token_usage"] == usage
+
+
+@pytest.mark.parametrize("value", [None, -1, True, "12", 1.5])
+def test_invalid_token_counts_remain_unknown(value):
+    metrics = summarize_experience(
+        [
+            {
+                "metadata": {
+                    "scenario": "short_answer",
+                    "experience": {
+                        "attempted": True,
+                        "prompt_tokens": value,
+                        "completion_tokens": value,
+                        "total_tokens": value,
+                    },
+                }
+            }
+        ]
+    )
+    for item in metrics["overall"]["token_usage"].values():
+        assert item == {"tokens": None, "reported_requests": 0, "missing_requests": 1}

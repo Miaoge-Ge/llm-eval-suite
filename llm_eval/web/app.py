@@ -160,7 +160,11 @@ def create_app(settings: WebSettings | None = None, manager: JobManager | None =
             ready = path.is_file()
             if task == "livecodebench":
                 ready = ready and (path.parent / "LiveCodeBench.private").is_dir()
-            tasks.append({"id": task, "label": label, "available": ready})
+            count = None
+            if path.is_file():
+                with path.open(encoding="utf-8") as dataset:
+                    count = sum(1 for line in dataset if line.strip())
+            tasks.append({"id": task, "label": label, "available": ready and bool(count), "total_cases": count})
         return {
             "tasks": tasks,
             "base_url": settings.default_base_url,

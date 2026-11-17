@@ -7,6 +7,30 @@ from collections import Counter
 from typing import Any
 
 
+def token_count(value: Any) -> int | None:
+    return value if type(value) is int and value >= 0 else None
+
+
+def summarize_tokens(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    usage = {}
+    for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        values = []
+        for row in rows:
+            value = token_count(row.get(field))
+            if field == "total_tokens" and value is None:
+                prompt, completion = token_count(row.get("prompt_tokens")), token_count(row.get("completion_tokens"))
+                if prompt is not None and completion is not None:
+                    value = prompt + completion
+            if value is not None:
+                values.append(value)
+        usage[field] = {
+            "tokens": sum(values) if values else None,
+            "reported_requests": len(values),
+            "missing_requests": len(rows) - len(values),
+        }
+    return usage
+
+
 def request_metrics(
     attempt: dict[str, Any], *, thinking: bool, stall_threshold: float, slo: dict[str, float | None]
 ) -> dict[str, Any]:
@@ -68,6 +92,7 @@ def request_metrics(
         "http_status_code": attempt.get("http_status_code"),
         "prompt_tokens": usage.get("prompt_tokens"),
         "completion_tokens": completion,
+        "total_tokens": usage.get("total_tokens"),
         "reasoning_tokens": reasoning_tokens,
         "cached_prompt_tokens": attempt.get("cached_prompt_tokens"),
         "error_category": error_category(attempt) if not success else None,
@@ -158,6 +183,7 @@ def summarize_experience(results: list[dict[str, Any]], *, concurrency: int = 1)
             "planned": len(rows),
             "attempted": len(attempts),
             "successful": len(successes),
+            "token_usage": summarize_tokens(attempts),
             "output_checks": {
                 "checked": len(checks),
                 "passed": sum(checks),
