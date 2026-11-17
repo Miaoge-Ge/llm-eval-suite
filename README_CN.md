@@ -32,6 +32,8 @@ PowerShell 使用 `Copy-Item` 复制文件，用 `$env:OPENAI_API_KEY = '你的�
 
 ## 网页工作台
 
+[原生架构与匿名隔离](docs/native-service.md) · [并发性能与迁移验证](docs/validation-native-2026-11-17.md)
+
 生产网页使用 Linux C++20 服务：网页 HTTP、匿名会话、任务调度、模型 HTTP/SSE 请求均由 C++ 执行。既有 Python 官方评分器和代码题沙箱保留，保证评分规则不变。构建依赖和 HTTPS 配置见 [部署说明](docs/deployment.md)。
 
 ```bash

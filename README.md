@@ -32,6 +32,8 @@ Full tasks: `humaneval`, `humanevalplus`, `mbpp`, `mbppplus`, `gsm`, `aime2025`,
 
 ## Web workbench
 
+[Native architecture](docs/native-service.md) · [Concurrency and migration validation](docs/validation-native-2026-11-17.md)
+
 The production web service uses C++20 on Linux for HTTP, signed anonymous sessions, scheduling and model HTTP/SSE requests. Existing Python benchmark graders and isolated Python code execution preserve the scoring rules. Build dependencies and HTTPS setup are in the [deployment guide](docs/deployment.md).
 
 ```bash
