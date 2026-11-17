@@ -47,6 +47,9 @@ class _ExtendedLimits(ctypes.Structure):
 
 
 class WindowsJob:
+    kernel: ctypes.CDLL
+    handle: int | None
+
     def __init__(self, pid: int, memory_mb: int | None = None, pids_limit: int = 64) -> None:
         if sys.platform != "win32":
             raise RuntimeError("Windows job objects require Windows")

@@ -38,7 +38,9 @@ jobs:
           uv run --frozen ruff format --check .
           uv run --frozen mypy llm_eval
       - name: Offline regression
-        run: uv run --frozen pytest --basetemp .pytest_cache/ci --junitxml=results/ci/tests.xml
+        run: |
+          uv run --frozen python -c "from pathlib import Path; Path('.pytest_cache').mkdir(exist_ok=True)"
+          uv run --frozen pytest --basetemp .pytest_cache/ci --junitxml=results/ci/tests.xml
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -69,10 +71,9 @@ jobs:
       - name: Real container integration
         env:
           LLM_EVAL_DOCKER_TESTS: "1"
-        run: >-
-          uv run --frozen pytest tests/test_docker_integration.py
-          tests/test_lightweight_suites.py::test_full_quick40_reference_run_resume_and_offline_grading
-          --basetemp .pytest_cache/docker --junitxml=results/ci/docker.xml
+        run: |
+          uv run --frozen python -c "from pathlib import Path; Path('.pytest_cache').mkdir(exist_ok=True)"
+          uv run --frozen pytest tests/test_docker_integration.py tests/test_lightweight_suites.py::test_full_quick40_reference_run_resume_and_offline_grading --basetemp .pytest_cache/docker --junitxml=results/ci/docker.xml
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

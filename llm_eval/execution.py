@@ -322,6 +322,9 @@ class ExecutionEngine:
                 pipe.close()
 
         status = None
+        creation_flags = 0
+        if sys.platform == "win32":
+            creation_flags = subprocess.CREATE_NO_WINDOW
         try:
             process = subprocess.Popen(
                 command,
@@ -331,7 +334,7 @@ class ExecutionEngine:
                 cwd=directory,
                 env=_local_environment(directory) if local else None,
                 start_new_session=os.name != "nt",
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=creation_flags,
             )
             if os.name == "nt":
                 from ._windows_job import WindowsJob
