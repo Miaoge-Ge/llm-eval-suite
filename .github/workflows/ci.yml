@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "0.9.11"
+          python-version: "3.12.3"
+          enable-cache: true
+      - run: uv sync --frozen --extra dev
+      - name: Lint and type check
+        if: runner.os == 'Linux'
+        run: |
+          uv run --frozen ruff check .
+          uv run --frozen ruff format --check .
+          uv run --frozen mypy llm_eval
+      - name: Offline regression
+        run: uv run --frozen pytest --basetemp .pytest_cache/ci --junitxml=results/ci/tests.xml
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tests-${{ matrix.os }}
+          path: results/ci/
+          retention-days: 14
+          if-no-files-found: warn
+
+  docker:
+    name: Real Docker and full Quick40 grading
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "0.9.11"
+          python-version: "3.12.3"
+          enable-cache: true
+      - run: uv sync --frozen --extra dev
+      - name: Prepare execution images
+        run: |
+          docker pull python:3.12-slim
+          docker build -t llm-eval-python:3.12-numpy2.2.6 -f docker/Dockerfile.numpy docker
+      - name: Real container integration
+        env:
+          LLM_EVAL_DOCKER_TESTS: "1"
+        run: >-
+          uv run --frozen pytest tests/test_docker_integration.py
+          tests/test_lightweight_suites.py::test_full_quick40_reference_run_resume_and_offline_grading
+          --basetemp .pytest_cache/docker --junitxml=results/ci/docker.xml
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: docker-tests
+          path: results/ci/
+          retention-days: 14
+          if-no-files-found: warn

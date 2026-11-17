@@ -32,3 +32,4 @@ results/
 configs/*
 # ...but keep the committed, secret-free example config
 !configs/model.example.yaml
+!configs/deepseek.ci.yaml

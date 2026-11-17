@@ -1,0 +1,68 @@
+name: DeepSeek live evaluation
+run-name: DeepSeek Flash - 30 API requests and 40 benchmark cases
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deepseek-live
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "0.9.11"
+          python-version: "3.12.3"
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Check API secret
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          if [ -z "$DEEPSEEK_API_KEY" ]; then
+            echo "::error::Configure the DEEPSEEK_API_KEY repository secret."
+            exit 1
+          fi
+      - name: Prepare Plus execution image
+        run: docker build -t llm-eval-python:3.12-numpy2.2.6 -f docker/Dockerfile.numpy docker
+      - name: API experience - 30 requests, no retries
+        id: api
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: uv run --frozen llm-eval api-test --config configs/deepseek.ci.yaml
+      - name: Quick40 - full benchmark tests
+        if: ${{ !cancelled() && steps.api.outcome != 'skipped' }}
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: uv run --frozen llm-eval quick-test --config configs/deepseek.ci.yaml
+      - name: Publish evaluation summaries
+        if: always()
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          reports = sorted(Path("results/deepseek-flash").rglob("report.md"))
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as output:
+              for report in reports:
+                  output.write(report.read_text(encoding="utf-8") + "\n\n")
+              if not reports:
+                  output.write("No evaluation reports were produced; inspect the failed setup step.\n")
+          PY
+      - name: Upload reports and raw generations
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: deepseek-flash-${{ github.run_id }}-${{ github.run_attempt }}
+          path: results/deepseek-flash/
+          retention-days: 14
+          if-no-files-found: warn

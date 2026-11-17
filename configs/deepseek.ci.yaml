@@ -1,0 +1,15 @@
+# GitHub Actions injects the repository secret into this environment variable.
+base_url: https://api.deepseek.com/v1
+api_key: ${DEEPSEEK_API_KEY}
+model_name: deepseek-flash
+workers: 1
+timeout_seconds: 120
+execution_timeout_seconds: 20
+
+# DeepSeek Flash emits reasoning by default; record and request that mode explicitly.
+thinking_enabled: true
+
+# Keep the fixed suite defaults: API caps 256/768/256; Quick40 cap 4096.
+execution:
+  backend: docker
+  image: llm-eval-python:3.12-numpy2.2.6

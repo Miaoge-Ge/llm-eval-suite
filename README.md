@@ -321,6 +321,29 @@ Ctrl+C stops scheduling, execution, and retries, attempts to close active model 
 
 ## Development
 
+### GitHub Actions
+
+`CI` runs Linux/Windows regression, Ruff, mypy, and real Docker integration on pushes, pull requests, and manual dispatch. Regular CI does not call model APIs; its full Quick40 container test uses reference answers.
+
+`DeepSeek live evaluation` is manually dispatched and uses `configs/deepseek.ci.yaml` with the `DEEPSEEK_API_KEY` repository Actions secret:
+
+```bash
+gh workflow run deepseek-live.yml --ref main
+```
+
+It runs `api-test` (30 streaming requests, one worker, no retries), followed by `quick-test` (all 40 cases, full Plus tests in real Docker). The profile selects `deepseek-flash` at `https://api.deepseek.com/v1` with thinking explicitly enabled. API scenario output caps are 256/768/256; Quick40 uses 4096. Timing reflects the GitHub-hosted runner's network path.
+
+Wrong model answers remain benchmark outcomes; API, execution, and storage errors fail the workflow. Quick40 is still attempted if the API experience step fails. Reports appear in the run Summary; raw responses, chunk timelines, and JSON/Markdown reports are uploaded as artifacts for 14 days. Live evaluation never runs automatically on pull requests.
+
+For local evaluation, set `DEEPSEEK_API_KEY` and run:
+
+```bash
+uv run llm-eval api-test --config configs/deepseek.ci.yaml
+uv run llm-eval quick-test --config configs/deepseek.ci.yaml
+```
+
+### Local validation
+
 Tests do not call live model APIs. Real container tests are opt-in after preparing Docker and its image: set `LLM_EVAL_DOCKER_TESTS=1`, then run `uv run pytest tests/test_docker_integration.py tests/test_lightweight_suites.py`. They are skipped otherwise; mocked Docker tests are not a substitute for container validation.
 
 The lightweight suite tests cover fixed selection, retry-free accounting for 30 API requests, and all 40 reference answers graded in real Docker, including resume and offline regrading. API failures are injected through a mock HTTP transport.

@@ -327,6 +327,29 @@ execution:
 
 ## 开发
 
+### GitHub Actions
+
+`CI` 在 push、PR 和手动触发时运行 Linux/Windows 回归、Ruff、mypy，以及真实 Docker 集成测试。普通 CI 不调用模型 API，固定 40 题的容器测试使用参考答案。
+
+`DeepSeek live evaluation` 仅手动触发，使用 `configs/deepseek.ci.yaml` 和仓库 Actions Secret `DEEPSEEK_API_KEY`：
+
+```bash
+gh workflow run deepseek-live.yml --ref main
+```
+
+它依次执行 `api-test`（30 次流式请求、单并发、禁止重试）和 `quick-test`（固定 40 题、完整 Plus 测试、真实 Docker）。当前配置使用 `https://api.deepseek.com/v1` 的 `deepseek-flash`，显式启用思考；API 输出上限按场景为 256/768/256，能力测试为 4096。计时反映 GitHub 托管 runner 到服务端的网络环境。
+
+工作流保留真实评分结果；模型答错不作为 CI 基础设施失败，API、运行及存储错误会导致工作流失败。即使计时步骤失败，也会继续尝试能力测试。报告展示在运行 Summary，原始响应、逐段计时和 JSON/Markdown 报告作为 artifact 保留 14 天。真实测试不会在 PR 上自动运行。
+
+也可以在本地设置 `DEEPSEEK_API_KEY` 后执行：
+
+```bash
+uv run llm-eval api-test --config configs/deepseek.ci.yaml
+uv run llm-eval quick-test --config configs/deepseek.ci.yaml
+```
+
+### 本地验证
+
 所有工具均在 `pyproject.toml` 中配置，并通过 `uv` 运行：
 
 ```bash
