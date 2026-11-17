@@ -3,6 +3,11 @@ run-name: Native C++ - DeepSeek Flash, 10 workers, 30 API requests and 40 benchm
 
 on:
   workflow_dispatch:
+    inputs:
+      public_url:
+        description: Optional deployed HTTPS URL for anonymous-session smoke testing
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -59,6 +64,11 @@ jobs:
               if not reports:
                   output.write("No evaluation reports were produced; inspect the failed setup step.\n")
           PY
+      - name: Public anonymous HTTPS sessions
+        if: ${{ inputs.public_url != '' }}
+        env:
+          PUBLIC_URL: ${{ inputs.public_url }}
+        run: uv run --frozen python scripts/native/public_smoke.py --url "$PUBLIC_URL" --output results/deepseek-flash/public-smoke.json
       - name: Upload reports and raw generations
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
