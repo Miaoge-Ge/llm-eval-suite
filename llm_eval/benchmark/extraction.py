@@ -38,7 +38,11 @@ def last_numeric_token(text: str) -> str | None:
             return None
         time_unit = r"(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)"
         conversion = rf"(?:\s*\((?:or\s+)?(?:{number}\s+{time_unit}\s*)+\))?"
-        unit = rf"(?:\s+{time_unit}{conversion}|\s+(?:dollars?|cents?|euros?|pounds?)|\s*%)?"
+        length_unit = (
+            r"(?:millimet(?:er|re)s?|centimet(?:er|re)s?|kilomet(?:er|re)s?|met(?:er|re)s?|"
+            r"miles?|yards?|feet|foot|inch(?:es)?|mm|cm|km|m|ft)"
+        )
+        unit = rf"(?:\s+{time_unit}{conversion}|\s+(?:dollars?|cents?|euros?|pounds?|{length_unit})|\s*%)?"
         rate_unit = rf"(?:\s+per\s+(?:{time_unit}|cups?|items?|pieces?|persons?|people|students?|tickets?))?"
         # Explicit answer markers may include a currency or a known unit. Do not
         # accept arithmetic, prose alternatives, or numbers buried in reasoning.

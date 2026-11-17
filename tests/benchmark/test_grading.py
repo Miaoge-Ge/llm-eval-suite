@@ -202,14 +202,30 @@ def test_gsm_uses_last_answer_marker():
         ("#### 160 minutes (2 hours 40 minutes)", "160"),
         ("#### 160 minutes (or 2 hours 40 minutes)", "160"),
         ("#### 10 dollars", "10"),
+        ("#### 540 meters", "540"),
+        ("#### 45 miles", "45"),
+        ("#### 2.5 kilometres", "2.5"),
+        ("#### 18 feet", "18"),
+        ("#### 1 inch", "1"),
+        ("#### 12 inches", "12"),
     ],
 )
-def test_gsm_explicit_currency_and_time_units(answer, expected):
+def test_gsm_explicit_currency_time_and_length_units(answer, expected):
     assert last_numeric_token(answer) == expected
 
 
 @pytest.mark.parametrize(
-    "answer", ["#### 2 or 3", "#### 2 + 3 minutes", "#### 2/3 hours", "#### 2 minutes (actually 3)", "#### $2e3"]
+    "answer",
+    [
+        "#### 2 or 3",
+        "#### 2 + 3 minutes",
+        "#### 2/3 hours",
+        "#### 2 minutes (actually 3)",
+        "#### $2e3",
+        "#### 45 miles or 46 miles",
+        "#### 180 - 135 miles",
+        "#### 45 miles (actually 46)",
+    ],
 )
 def test_gsm_unit_adaptation_still_rejects_ambiguous_answers(answer):
     assert last_numeric_token(answer) is None
