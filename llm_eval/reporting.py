@@ -7,18 +7,24 @@ containing:
   run keeps everything graded so far
 - ``config.json`` — snapshot of the effective configuration (API key masked)
 - ``report.md`` — the final human-readable report
+- ``status.json`` — atomically updated lifecycle state
+- ``summary.json`` — final machine-readable metrics
 """
 
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import time
-from dataclasses import dataclass
+import uuid
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, TextIO
 
+from .artifacts import RunLock, encode_json, write_atomic, write_json
 from .settings import FrameworkConfig
-from .status import GRADED_STATUSES, Status
+from .status import ERROR_STATUSES, GRADED_STATUSES, RunStatus, Status
 from .utils import natural_sort_key, slugify
 
 
@@ -35,6 +41,26 @@ class RunSummary:
     throughput_tokens_per_second: float
     status_counts: dict[str, int]
     token_usage: dict[str, int]
+    run_status: str = RunStatus.COMPLETED
+    error: str | None = None
+    cancelled_cases: int = 0
+    operation: str = "run"
+    api_attempts: int | None = None
+    new_api_attempts: int = 0
+    new_token_usage: dict[str, int] = field(default_factory=dict)
+    source_run: str | None = None
+    incomplete_usage_cases: int | None = None
+    test_coverage: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def coverage_rate(self) -> float:
+        graded = sum(self.status_counts.get(status, 0) for status in GRADED_STATUSES)
+        return graded / self.total_cases if self.total_cases else 0.0
+
+    @property
+    def error_rate(self) -> float:
+        errors = sum(self.status_counts.get(status, 0) for status in ERROR_STATUSES)
+        return errors / self.total_cases if self.total_cases else 0.0
 
 
 @dataclass(frozen=True)
@@ -43,41 +69,89 @@ class RunPaths:
     results_jsonl: Path
     report_md: Path
     config_json: Path
+    status_json: Path
+    summary_json: Path
 
 
 class ResultWriter:
-    def __init__(self, config: FrameworkConfig) -> None:
+    def __init__(self, config: FrameworkConfig, root: Path | None = None) -> None:
         self.config = config
-        root = _allocate_run_dir(config)
+        root = root or _allocate_run_dir(config)
         self.paths = RunPaths(
             root=root,
             results_jsonl=root / "results.jsonl",
             report_md=root / "report.md",
             config_json=root / "config.json",
+            status_json=root / "status.json",
+            summary_json=root / "summary.json",
         )
         self._results_handle: TextIO | None = None
+        self._lock = RunLock(root)
 
     def __enter__(self) -> ResultWriter:
-        self.paths.config_json.write_text(
-            json.dumps(self.config.to_public_dict(), indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        self._results_handle = self.paths.results_jsonl.open("w", encoding="utf-8")
+        self._lock.__enter__()
         return self
+
+    def start(self, checkpoints: list[dict[str, Any]] | None = None) -> None:
+        if not self.paths.config_json.exists():
+            write_json(self.paths.config_json, self.config.to_public_dict())
+        write_json(self.paths.root / "sessions" / f"{uuid.uuid4().hex}.json", self.config.to_public_dict())
+        if checkpoints is not None:
+            if self.paths.results_jsonl.exists():
+                history = self.paths.root / "history"
+                history.mkdir(exist_ok=True)
+                shutil.copyfile(self.paths.results_jsonl, history / f"results-{uuid.uuid4().hex}.jsonl")
+            self.finalize_results(checkpoints)
+        self._results_handle = self.paths.results_jsonl.open("a", encoding="utf-8", newline="\n")
+        self.write_state(RunStatus.RUNNING)
 
     def write_result(self, payload: dict[str, Any]) -> None:
         if self._results_handle is None:
             raise RuntimeError("ResultWriter must be entered before writing results")
+        write_json(self.paths.root / "cases" / f"{payload['case_index']:08d}.json", payload)
         self._results_handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
         self._results_handle.flush()
+        os.fsync(self._results_handle.fileno())
+
+    def finalize_results(self, results: list[dict[str, Any]]) -> None:
+        if self._results_handle is not None:
+            self._results_handle.close()
+            self._results_handle = None
+        ordered = sorted(results, key=lambda item: item["case_index"])
+        write_atomic(self.paths.results_jsonl, "".join(encode_json(item) + "\n" for item in ordered))
 
     def write_report(self, content: str) -> None:
-        self.paths.report_md.write_text(content, encoding="utf-8")
+        write_atomic(self.paths.report_md, content)
+
+    def write_state(self, status: str, **fields: Any) -> None:
+        _write_json_atomic(self.paths.status_json, {"status": status, "updated_at": time.time(), **fields})
+
+    def write_summary(self, summary: RunSummary) -> None:
+        _write_json_atomic(
+            self.paths.summary_json,
+            {
+                **asdict(summary),
+                "coverage_rate": summary.coverage_rate,
+                "error_rate": summary.error_rate,
+            },
+        )
+        self.write_state(
+            summary.run_status,
+            total_cases=summary.total_cases,
+            completed_cases=summary.completed_cases,
+            cancelled_cases=summary.cancelled_cases,
+            error=summary.error,
+        )
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         if self._results_handle is not None:
             self._results_handle.close()
             self._results_handle = None
+        self._lock.__exit__(exc_type, exc_val, exc_tb)
+
+
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    write_json(path, payload)
 
 
 def _allocate_run_dir(config: FrameworkConfig) -> Path:
@@ -85,11 +159,13 @@ def _allocate_run_dir(config: FrameworkConfig) -> Path:
     stamp = time.strftime("%Y%m%d-%H%M%S")
     candidate = base / stamp
     counter = 2
-    while candidate.exists():
-        candidate = base / f"{stamp}-{counter}"
-        counter += 1
-    candidate.mkdir(parents=True)
-    return candidate
+    while True:
+        try:
+            candidate.mkdir(parents=True)
+            return candidate
+        except FileExistsError:
+            candidate = base / f"{stamp}-{counter}"
+            counter += 1
 
 
 def render_markdown_report(
@@ -100,6 +176,12 @@ def render_markdown_report(
     usage = summary.token_usage
     generated_at = time.strftime("%Y-%m-%d %H:%M:%S")
     graded = sum(summary.status_counts.get(status, 0) for status in GRADED_STATUSES)
+    attempts = summary.api_attempts
+    if attempts is None:
+        attempts = sum(item.get("api_attempts", 0) for item in results)
+    incomplete = summary.incomplete_usage_cases
+    if incomplete is None:
+        incomplete = sum(not item.get("usage_complete", True) for item in results)
     lines = [
         f"# Evaluation Report - {summary.task}",
         "",
@@ -110,11 +192,21 @@ def render_markdown_report(
         "| Field | Value |",
         "| --- | --- |",
         f"| Task | `{summary.task}` |",
+        f"| Operation | `{summary.operation}` |",
+        f"| Source run | {_cell(summary.source_run or 'none')} |",
         f"| Model | `{summary.model}` |",
         f"| Dataset | `{config.dataset.path}` |",
         f"| Workers | `{config.run.workers}` |",
         f"| Thinking enabled | `{config.run.thinking_enabled}` |",
         f"| Reasoning effort | `{config.run.reasoning_display}` |",
+        f"| Run status | **{summary.run_status}** |",
+        f"| Execution backend (code tasks) | `{config.run.execution.backend}` |",
+        f"| Execution image | `{config.run.execution.image}` |",
+        f"| Execution timeout | {config.run.execution_timeout_seconds}s |",
+        f"| Execution limits | memory={config.run.execution.memory_mb} MiB; "
+        f"cpus={config.run.execution.cpus}; pids={config.run.execution.pids_limit}; "
+        f"output={config.run.execution.max_output_bytes} bytes |",
+        f"| Stop reason | {_cell(summary.error or 'none')} |",
         "",
         "## Metrics",
         "",
@@ -123,13 +215,23 @@ def render_markdown_report(
         f"| Pass rate | **{summary.pass_rate:.2%}** |",
         f"| Total cases | {summary.total_cases} |",
         f"| Completed cases | {summary.completed_cases} |",
+        f"| Cancelled cases | {summary.cancelled_cases} |",
         f"| Graded cases | {graded} |",
+        f"| Grading coverage | {summary.coverage_rate:.2%} |",
+        f"| Infrastructure error rate | {summary.error_rate:.2%} |",
         f"| Wall clock | {summary.wall_clock_human} |",
         f"| Average case time | {summary.average_case_seconds:.2f}s |",
         f"| Throughput | {summary.throughput_tokens_per_second:.1f} tokens/s |",
         f"| Prompt tokens | {usage.get('prompt_tokens', 0):,} |",
         f"| Completion tokens | {usage.get('completion_tokens', 0):,} |",
         f"| Total tokens | {usage.get('total_tokens', 0):,} |",
+        f"| API attempts | {attempts} |",
+        f"| API attempts this session | {summary.new_api_attempts} |",
+        f"| Tokens this session | {summary.new_token_usage.get('total_tokens', 0)} |",
+        f"| Cases with incomplete token usage | {incomplete} |",
+        "",
+        "Token totals include only usage returned by the provider; missing usage is not estimated.",
+        "Pass rate uses graded cases only. Coverage and run status indicate whether the evaluation is complete.",
         "",
         "### Status counts",
         "",
@@ -139,6 +241,24 @@ def render_markdown_report(
     for status, count in sorted(summary.status_counts.items()):
         lines.append(f"| {status} | {count} |")
 
+    if summary.test_coverage:
+        scope = summary.test_coverage
+        lines.extend(
+            [
+                "",
+                "### Test coverage",
+                "",
+                f"Scope: **{scope['scope']}**. This is the stdin/stdout subset, not the full LiveCodeBench benchmark.",
+                f"Public tests: {scope['public_tests']}; private tests: {scope['private_tests']}; "
+                f"problems with private tests: {scope['problems_with_private_tests']}; "
+                f"public-only problems: {scope['public_only_problems']}.",
+            ]
+        )
+        if scope["public_only_problems"]:
+            lines.append(
+                "**Incomplete test coverage: the pass rate includes public-only samples and must not be "
+                "reported as a full-test benchmark score.**"
+            )
     domain_rows = _domain_breakdown(results)
     if domain_rows:
         lines.extend(
@@ -183,7 +303,7 @@ def _domain_breakdown(results: list[dict[str, Any]]) -> list[tuple[str, int, int
     stats: dict[str, list[int]] = {}
     for item in results:
         domain = (item.get("metadata") or {}).get("domain")
-        if not domain:
+        if not domain or item.get("status") not in GRADED_STATUSES:
             continue
         entry = stats.setdefault(domain, [0, 0])
         entry[1] += 1

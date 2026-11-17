@@ -1,6 +1,8 @@
 import json
 import time
 
+import pytest
+
 from llm_eval.clients import GenerationResult
 from llm_eval.runner import EvaluationRunner
 from llm_eval.settings import DatasetConfig, FrameworkConfig, ModelConfig, RunConfig
@@ -58,7 +60,8 @@ def test_runner_aborts_on_fatal_api_error(tmp_path):
     assert summary.completed_cases < summary.total_cases
     # every completed case is persisted incrementally
     persisted = writer.paths.results_jsonl.read_text(encoding="utf-8").strip().splitlines()
-    assert len(persisted) == summary.completed_cases
+    assert len(persisted) == summary.total_cases
+    assert sum(json.loads(row)["status"] != "CANCELLED" for row in persisted) == summary.completed_cases
 
 
 def test_runner_writes_run_artifacts(tmp_path):
@@ -104,3 +107,139 @@ def test_task_registry_auto_registers_all_tasks():
         "livecodebench",
     }
     assert expected == set(TASK_REGISTRY)
+
+
+def test_runner_persists_and_reports_usage_from_failed_requests(tmp_path):
+    class UsageErrorClient:
+        def generate(self, messages):
+            return GenerationResult(
+                content="",
+                usage={"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12},
+                error="stream interrupted",
+                attempts=3,
+                usage_complete=False,
+            )
+
+    runner = EvaluationRunner(_gsm_config(tmp_path, [{"question": "2+2?", "answer": "#### 4"}]))
+    runner.client = UsageErrorClient()
+    summary, writer = runner.run()
+    assert summary.token_usage == {"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12}
+    result = json.loads(writer.paths.results_jsonl.read_text(encoding="utf-8"))
+    assert result["status"] == "API_ERROR"
+    assert result["total_tokens"] == 12
+    assert result["api_attempts"] == 3
+    assert result["usage_complete"] is False
+    report = writer.paths.report_md.read_text(encoding="utf-8")
+    assert "| API attempts | 3 |" in report
+    assert "| Cases with incomplete token usage | 1 |" in report
+    assert summary.run_status == "FAILED"
+    assert summary.error_rate == 1.0
+    assert summary.coverage_rate == 0.0
+
+
+def test_fatal_error_stops_scheduling_and_persists_aborted_state(tmp_path):
+    runner = EvaluationRunner(_gsm_config(tmp_path, [{"question": "2+2?", "answer": "#### 4"}] * 8))
+    runner.client = FatalClient()
+    summary, writer = runner.run()
+    assert runner.client.calls == 1
+    assert summary.run_status == "ABORTED"
+    assert summary.completed_cases == 1
+    assert summary.cancelled_cases == 7
+    assert json.loads(writer.paths.status_json.read_text())["status"] == "ABORTED"
+    assert json.loads(writer.paths.summary_json.read_text())["cancelled_cases"] == 7
+
+
+def test_keyboard_interrupt_writes_partial_results_and_report(tmp_path, monkeypatch):
+    from llm_eval import runner as runner_module
+
+    original_wait = runner_module.concurrent.futures.wait
+    calls = 0
+
+    def interrupt_once(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise KeyboardInterrupt
+        return original_wait(*args, **kwargs)
+
+    monkeypatch.setattr(runner_module.concurrent.futures, "wait", interrupt_once)
+    runner = EvaluationRunner(_gsm_config(tmp_path, [{"question": "2+2?", "answer": "#### 4"}] * 8))
+    runner.client = EchoClient()
+    summary, writer = runner.run()
+    assert summary.run_status == "INTERRUPTED"
+    assert 1 <= summary.completed_cases < 8
+    assert summary.cancelled_cases == 8 - summary.completed_cases
+    assert writer.paths.report_md.exists()
+    assert json.loads(writer.paths.status_json.read_text())["status"] == "INTERRUPTED"
+    assert len(writer.paths.results_jsonl.read_text().splitlines()) == 8
+
+
+def test_missing_execution_backend_fails_before_model_request(fake_config, monkeypatch):
+    from dataclasses import replace
+
+    from llm_eval.settings import ExecutionConfig
+
+    fake_config.dataset.path.write_text(
+        json.dumps({"task_id": "h/0", "prompt": "def f(): pass", "test": "assert True"}), encoding="utf-8"
+    )
+    config = replace(fake_config, run=replace(fake_config.run, execution=ExecutionConfig()))
+    monkeypatch.setattr("llm_eval.execution.shutil.which", lambda _: None)
+    runner = EvaluationRunner(config)
+
+    class NoCallClient:
+        def generate(self, messages):
+            pytest.fail("Preflight must prevent paid model requests")
+
+    runner.client = NoCallClient()
+    summary, writer = runner.run()
+    assert summary.run_status == "FAILED"
+    assert "Docker" in summary.error
+    assert summary.completed_cases == 0
+    assert json.loads(writer.paths.status_json.read_text())["status"] == "FAILED"
+
+
+def test_wrong_model_answers_are_a_completed_run(tmp_path):
+    runner = EvaluationRunner(_gsm_config(tmp_path, [{"question": "2+3?", "answer": "#### 5"}]))
+    runner.client = EchoClient()
+    summary, _ = runner.run()
+    assert summary.run_status == "COMPLETED"
+    assert summary.pass_rate == 0.0
+    assert summary.coverage_rate == 1.0
+    assert summary.error_rate == 0.0
+
+
+def test_execution_backend_failure_aborts_remaining_cases(fake_config, monkeypatch):
+    from llm_eval.execution import ExecutionResult
+
+    row = {"task_id": "h/0", "prompt": "def f(): pass", "entry_point": "f", "test": "def check(f): assert True"}
+    fake_config.dataset.path.write_text("\n".join(json.dumps(row) for _ in range(5)), encoding="utf-8")
+    runner = EvaluationRunner(fake_config)
+    runner.client = EchoClient()
+    monkeypatch.setattr(
+        "llm_eval.execution.ExecutionEngine.run",
+        lambda *args, **kwargs: ExecutionResult("EXECUTION_ERROR", detail="daemon disconnected"),
+    )
+    summary, _ = runner.run()
+    assert summary.run_status == "ABORTED"
+    assert summary.status_counts["EXECUTION_ERROR"] >= 1
+    assert summary.coverage_rate == 0.0
+    assert "daemon disconnected" in summary.error
+
+
+@pytest.mark.parametrize("status", ["TIMEOUT", "OUTPUT_LIMIT", "RESOURCE_LIMIT"])
+def test_execution_limits_are_graded_outcomes(fake_config, monkeypatch, status):
+    from llm_eval.execution import ExecutionResult
+
+    row = {"task_id": "h/0", "prompt": "def f(): pass", "entry_point": "f", "test": "def check(f): assert True"}
+    fake_config.dataset.path.write_text(json.dumps(row), encoding="utf-8")
+    runner = EvaluationRunner(fake_config)
+    runner.client = EchoClient()
+    monkeypatch.setattr(
+        "llm_eval.execution.ExecutionEngine.run",
+        lambda *args, **kwargs: ExecutionResult(status, detail="limit exceeded"),
+    )
+    summary, _ = runner.run()
+    assert summary.run_status == "COMPLETED"
+    assert summary.coverage_rate == 1.0
+    assert summary.error_rate == 0.0
+    assert summary.pass_rate == 0.0

@@ -1,3 +1,7 @@
+import json
+import subprocess
+import sys
+
 from llm_eval.ifeval import evaluate
 
 
@@ -22,3 +26,24 @@ def test_ifeval_requires_all_instructions_for_prompt_strict():
     partial = evaluate("x", "Has Caps but no commas", instruction_ids, [{}, {}])
     assert partial["instructions_followed_strict"] == 1
     assert partial["prompt_strict"] is False
+
+
+def test_ifeval_language_scoring_is_reproducible_across_threads_and_processes():
+    script = """
+import json
+from concurrent.futures import ThreadPoolExecutor
+from llm_eval.ifeval import evaluate
+
+def score(_):
+    return evaluate("Write in English", "bonjour hello hola", ["language:response_language"], [{"language": "en"}])
+
+with ThreadPoolExecutor(max_workers=8) as pool:
+    print(json.dumps(list(pool.map(score, range(24)))))
+"""
+    runs = []
+    for _ in range(2):
+        process = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=30, check=True)
+        reports = json.loads(process.stdout)
+        assert all(report == reports[0] for report in reports)
+        runs.append(reports[0])
+    assert runs[0] == runs[1]

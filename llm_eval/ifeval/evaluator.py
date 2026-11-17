@@ -9,7 +9,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from langdetect import DetectorFactory
+from langdetect.detector_factory import init_factory
+
 from . import instructions_registry
+
+# langdetect's lazy global factory is published before its profiles finish
+# loading. Initialize under Python's module import lock, before worker threads
+# can use it, and make each detector's randomized inference reproducible.
+DetectorFactory.seed = 0
+init_factory()
 
 
 def _build_checker(instruction_id: str, kwargs: dict[str, Any], prompt: str) -> Any:

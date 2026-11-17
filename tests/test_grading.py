@@ -1,3 +1,5 @@
+import pytest
+
 from llm_eval.clients import GenerationResult
 from llm_eval.extraction import (
     extract_choice_letter,
@@ -5,7 +7,7 @@ from llm_eval.extraction import (
     last_numeric_token,
 )
 from llm_eval.reporting import _domain_breakdown
-from llm_eval.tasks import AIMETask, GPQATask, LiveCodeBenchTask, MMLUProTask, TaskCase
+from llm_eval.tasks import AIMETask, GPQATask, GSM8KTask, HumanEvalTask, LiveCodeBenchTask, MMLUProTask, TaskCase
 from llm_eval.utils import natural_sort_key
 
 
@@ -139,3 +141,113 @@ def test_gpqa_grades_choice_letter(fake_config):
 
     failed = task.evaluate_case(case, FakeClient(r"\boxed{A}"))
     assert failed.status == "FAILED"
+
+
+@pytest.mark.parametrize("answer", ["70.4", "69.6", "70.0", "140/2", r"\frac{140}{2}", "invalid70", "", "1000", "-70"])
+def test_aime_rejects_non_integer_boxed_answers(fake_config, answer):
+    case = TaskCase("aime", {"problem": "Find x", "answer": "70"})
+    result = AIMETask(fake_config).evaluate_case(case, FakeClient(r"\boxed{" + answer + "}"))
+    assert result.status == "FAILED"
+
+
+@pytest.mark.parametrize("content", [r"\boxed{070}", "Reasoning\n70", r"\boxed{71} then \boxed{70}"])
+def test_aime_accepts_whole_final_integer(fake_config, content):
+    case = TaskCase("aime", {"problem": "Find x", "answer": "70"})
+    assert AIMETask(fake_config).evaluate_case(case, FakeClient(content)).status == "PASSED"
+
+
+@pytest.mark.parametrize(
+    "content", [r"\boxed{70} then \boxed{}", r"\boxed{70} then \boxed{", "Reasoning includes 70 apples"]
+)
+def test_aime_does_not_fall_back_from_invalid_final_answer(fake_config, content):
+    case = TaskCase("aime", {"problem": "Find x", "answer": "70"})
+    assert AIMETask(fake_config).evaluate_case(case, FakeClient(content)).status == "FAILED"
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        (r"\boxed{Answer: B}", "B"),
+        (r"\boxed{answer is (b)}", "B"),
+        (r"\boxed{invalid}", None),
+        (r"\boxed{A or B}", None),
+        (r"\boxed{AB}", None),
+        (r"\boxed{A} then \boxed{}", None),
+        (r"\boxed{A} then \boxed{", None),
+        ("The answer is A. Correction: the answer is B.", "B"),
+        ("Answer: A. Final answer: invalid", None),
+        ("Answer: A or B", None),
+        ("Answer: Banana", None),
+        ("Reasoning\nB", "B"),
+        ("   ", None),
+    ],
+)
+def test_choice_parser_requires_unambiguous_final_answer(content, expected):
+    assert extract_choice_letter(content) == expected
+
+
+def test_gsm_uses_last_answer_marker():
+    assert last_numeric_token("#### 10\nCorrection\n#### 20") == "20"
+    assert last_numeric_token("#### 10\nCorrection\n#### unknown") is None
+    assert last_numeric_token("#### 10\n#### 20/2") is None
+
+
+def test_livecodebench_rejects_empty_tests_before_generation(fake_config):
+    class NoCallClient:
+        def generate(self, messages):
+            pytest.fail("Invalid test data must not trigger generation")
+
+    task = LiveCodeBenchTask(fake_config)
+    case = TaskCase("lcb", {"problem": "Read input", "tests": []})
+    assert task.evaluate_case(case, NoCallClient()).status == "INTERNAL_ERROR"
+    assert task._run_tests("raise RuntimeError()", [], 1)[0] == "INTERNAL_ERROR"
+
+
+@pytest.mark.parametrize(
+    ("actual", "expected", "correct"),
+    [
+        ("9007199254740993", "9007199254740992", False),
+        ("1.0000000001", "1", False),
+        ("0.0000000001", "0", False),
+        ("9" * 400, "8" * 400, False),
+        ("18.000", "18", True),
+        ("-0", "0", True),
+        ("nan", "nan", False),
+        ("Infinity", "Infinity", False),
+        ("invalid", "invalid", False),
+    ],
+)
+def test_gsm_compares_exact_finite_decimals(fake_config, actual, expected, correct):
+    assert GSM8KTask(fake_config)._numbers_match(actual, expected) is correct
+
+
+@pytest.mark.parametrize("response", ["1/2", "1e2", "2 + 2", "There were 2 apples", "1,2", "#### 1/2"])
+def test_gsm_does_not_grade_numeric_fragments(fake_config, response):
+    case = TaskCase("gsm", {"question": "Compute the answer", "answer": "#### 2"})
+    assert GSM8KTask(fake_config).evaluate_case(case, FakeClient(response)).status == "FAILED"
+
+
+def test_gsm_invalid_reference_is_not_a_model_failure(fake_config):
+    class NoCallClient:
+        def generate(self, messages):
+            pytest.fail("Invalid reference must not call the API")
+
+    case = TaskCase("gsm", {"question": "Compute", "answer": "#### unknown"})
+    assert GSM8KTask(fake_config).evaluate_case(case, NoCallClient()).status == "INTERNAL_ERROR"
+
+
+@pytest.mark.parametrize("fenced", [False, True])
+@pytest.mark.parametrize("indent", ["    ", "\t"])
+def test_humaneval_preserves_relative_body_indentation(fake_config, fenced, indent):
+    body = f"{indent}if x > 0:\n{indent}{indent}return x\n{indent}return -x\n"
+    response = f"```python\n{body}```" if fenced else body
+    case = TaskCase(
+        "h/body",
+        {
+            "prompt": 'def absolute(x):\n    """Absolute value."""\n',
+            "entry_point": "absolute",
+            "test": "def check(f):\n    assert f(2) == 2\n    assert f(-2) == 2",
+        },
+    )
+    result = HumanEvalTask(fake_config).evaluate_case(case, FakeClient(response))
+    assert result.status == "PASSED", result

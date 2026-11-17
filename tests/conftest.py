@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from llm_eval.settings import DatasetConfig, FrameworkConfig, ModelConfig, RunConfig
+from llm_eval.settings import DatasetConfig, ExecutionConfig, FrameworkConfig, ModelConfig, RunConfig
 
 
 @pytest.fixture
@@ -12,6 +12,8 @@ def fake_config(tmp_path):
     return FrameworkConfig(
         model=ModelConfig(api_key="x", base_url="https://example.invalid/v1", model_name="demo"),
         dataset=DatasetConfig(name="humaneval", path=dataset_path),
-        run=RunConfig(task="humaneval", output_dir=tmp_path / "results" / "demo"),
+        run=RunConfig(
+            task="humaneval", output_dir=tmp_path / "results" / "demo", execution=ExecutionConfig(backend="local")
+        ),
         model_config_path=Path("model.yaml"),
     )

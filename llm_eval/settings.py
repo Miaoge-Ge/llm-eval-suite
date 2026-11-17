@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+import math
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,10 @@ DEFAULT_DATASET_PATHS = {
     "livecodebench": Path("datasets/LiveCodeBench.jsonl"),
 }
 
+NUMPY_VERSION = "2.2.6"
+NUMPY_IMAGE = "llm-eval-python:3.12-numpy2.2.6"
+PLUS_TASKS = ("humanevalplus", "mbppplus")
+
 
 @dataclass(frozen=True)
 class ModelConfig:
@@ -38,6 +43,41 @@ class DatasetConfig:
 
 
 @dataclass(frozen=True)
+class ExecutionConfig:
+    backend: str = "docker"
+    image: str = "python:3.12-slim"
+    memory_mb: int = 256
+    cpus: float = 1.0
+    pids_limit: int = 64
+    max_output_bytes: int = 1_048_576
+    tmpfs_mb: int = 32
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.backend, str) or self.backend not in {"docker", "local"}:
+            raise ValueError("execution.backend must be docker or local")
+        if (
+            not isinstance(self.image, str)
+            or not self.image
+            or self.image.startswith("-")
+            or any(c.isspace() for c in self.image)
+        ):
+            raise ValueError("execution.image must be a nonempty Docker image reference")
+        for name in ("memory_mb", "pids_limit", "max_output_bytes", "tmpfs_mb"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(f"execution.{name} must be a positive integer")
+        if self.memory_mb < 16:
+            raise ValueError("execution.memory_mb must be at least 16")
+        if (
+            isinstance(self.cpus, bool)
+            or not isinstance(self.cpus, (int, float))
+            or not math.isfinite(self.cpus)
+            or self.cpus <= 0
+        ):
+            raise ValueError("execution.cpus must be finite and positive")
+
+
+@dataclass(frozen=True)
 class RunConfig:
     task: str
     workers: int = 10
@@ -46,6 +86,7 @@ class RunConfig:
     thinking_enabled: bool = False
     reasoning_effort: str | None = None
     limit: int | None = None
+    execution: ExecutionConfig = field(default_factory=ExecutionConfig)
 
     @property
     def reasoning_display(self) -> str:
@@ -77,8 +118,17 @@ def load_framework_config(
     root = repo_root()
     model_file = _resolve_file_path(model_config_path, root / "configs" / "model.yaml")
     model_data = _load_yaml(model_file)
-
+    execution_data = model_data.get("execution", {})
+    if not isinstance(execution_data, dict):
+        raise ValueError("execution must be a mapping")
     task_name = _require_text(task or "humaneval", "task")
+    if task_name in PLUS_TASKS:
+        execution_data = {"image": NUMPY_IMAGE, **execution_data}
+    try:
+        execution = ExecutionConfig(**execution_data)
+    except TypeError as exc:
+        raise ValueError(f"Invalid execution configuration: {exc}") from exc
+
     dataset_path = _resolve_dataset_path(task_name)
     model = ModelConfig(
         api_key=_require_text(model_data.get("api_key"), "api_key"),
@@ -95,6 +145,7 @@ def load_framework_config(
         thinking_enabled=parse_bool(model_data.get("thinking_enabled", False), default=False),
         reasoning_effort=_optional_text(model_data.get("reasoning_effort")),
         limit=max(1, int(limit)) if limit is not None else None,
+        execution=execution,
     )
 
     return FrameworkConfig(
@@ -142,3 +193,18 @@ def _optional_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def config_from_snapshot(payload: dict[str, Any], root: Path) -> FrameworkConfig:
+    """Reconstruct an offline configuration without loading secrets or environment placeholders."""
+    model = dict(payload["model"])
+    model["api_key"] = "offline-no-api-key"
+    run = dict(payload["run"])
+    run["output_dir"] = root / "regrades"
+    run["execution"] = ExecutionConfig(**run.get("execution", {}))
+    return FrameworkConfig(
+        model=ModelConfig(**model),
+        dataset=DatasetConfig(name=payload["dataset"]["name"], path=root / "dataset.jsonl"),
+        run=RunConfig(**run),
+        model_config_path=root / "config.json",
+    )
