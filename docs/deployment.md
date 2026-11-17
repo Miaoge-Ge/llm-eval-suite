@@ -60,3 +60,27 @@ Caddy 自动申请和续期证书，反向代理到本机 8080。不要把 8080 
 - 服务器测量与 GitHub runner 测量的网络路径不同，不应混成同一轮 API 质量统计。
 
 网页目前提供配置、启动、进度、取消、历史、报告和下载；离线重评分及 benchmark 断点续跑使用 CLI。模型验证仍是规划页。
+
+## 无域名时使用正式 IP 证书
+
+域名受到云服务商拦截时，可为公网 IP 申请 Let's Encrypt `shortlived` 证书。它是受信任的正式证书，寿命约六天，必须配置自动续期。已在 Ubuntu 24.04、Caddy 2.6.2、Certbot 5.10.0 验证。
+
+先用 Caddy 在 80 端口为 `/.well-known/acme-challenge/*` 提供 `/var/lib/llm-eval-acme` 下的文件，其余路径暂时返回 503。不要在 HTTP 页面提交访问密码。创建此目录后安装并申请证书（将示例 IP 替换为实际地址）：
+
+```bash
+sudo python3 -m venv /opt/llm-eval-certbot
+sudo /opt/llm-eval-certbot/bin/pip install certbot==5.10.0
+sudo install -d -m 0755 /var/lib/llm-eval-acme
+sudo /opt/llm-eval-certbot/bin/certbot certonly --webroot -w /var/lib/llm-eval-acme \
+  --ip-address 203.0.113.10 --cert-name llm-eval-ip --preferred-profile shortlived
+```
+
+根据 Certbot 提示完成账户设置。证书成功后：
+
+1. 执行 `sudo env RENEWED_LINEAGE=/etc/letsencrypt/live/llm-eval-ip sh deploy/certbot-deploy-hook.sh`，把证书复制到 `/etc/caddy/certs/llm-eval-ip/`，文件权限为 `0640 root:caddy`。此时 reload 仍使用初始 HTTP 配置。
+2. 替换 `deploy/Caddyfile.ip` 的 IP 占位符，安装到 `/etc/caddy/Caddyfile`，验证并 reload Caddy。`default_sni` 让不发送 SNI 的 IP 客户端选到正确证书。
+3. 把 deploy hook 安装到 `/etc/letsencrypt/renewal-hooks/deploy/llm-eval-caddy`，权限 `0750 root:root`。续期成功时复制新证书并 reload Caddy；Ubuntu 的 Caddy unit 用 `--force` 重新加载证书。
+4. 把 `deploy/llm-eval-cert-renew.service` 和 `.timer` 安装到 `/etc/systemd/system/`，执行 `systemctl daemon-reload`、`systemctl enable --now llm-eval-cert-renew.timer`。
+5. 执行 `certbot renew --cert-name llm-eval-ip --dry-run` 验证续期链路；这里的 certbot 是 `/opt/llm-eval-certbot/bin/certbot`。定时器每天检查两次。
+
+使用 `curl --fail https://实际IP/api/health` 验证受信任 HTTPS，不使用 `-k` 或跳过证书校验。HTTP 保留 ACME 验证路径，其余请求跳转到 HTTPS。

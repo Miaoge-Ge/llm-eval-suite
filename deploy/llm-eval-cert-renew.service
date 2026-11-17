@@ -1,0 +1,8 @@
+[Unit]
+Description=Renew LLM Eval Suite public IP certificate
+After=network-online.target caddy.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/llm-eval-certbot/bin/certbot renew --cert-name llm-eval-ip --quiet

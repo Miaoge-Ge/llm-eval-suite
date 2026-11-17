@@ -1,0 +1,24 @@
+# Replace {$LLM_EVAL_IP} with the public IPv4 address before installation.
+# Certbot must have issued llm-eval-ip and the deploy hook must copy its files.
+{
+    default_sni {$LLM_EVAL_IP}
+}
+
+:80 {
+    handle /.well-known/acme-challenge/* {
+        root * /var/lib/llm-eval-acme
+        file_server
+    }
+    handle {
+        redir https://{$LLM_EVAL_IP}{uri} permanent
+    }
+}
+
+https://{$LLM_EVAL_IP} {
+    tls /etc/caddy/certs/llm-eval-ip/fullchain.pem /etc/caddy/certs/llm-eval-ip/privkey.pem
+    encode gzip
+    request_body {
+        max_size 64KB
+    }
+    reverse_proxy 127.0.0.1:8080
+}

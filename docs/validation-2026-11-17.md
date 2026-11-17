@@ -51,3 +51,14 @@ Offline regrading the original answers with the corrected extractor made no API 
 - Web tests cover authenticated reports/downloads, cross-origin mutation rejection, default-key endpoint restriction, real runner integration, queue cancellation and restart recovery.
 
 Raw generations, per-chunk timings and full reports are downloadable from the live workflow artifact (14-day retention). Local copies should be kept when longer retention is required.
+
+## Deployed web service
+
+A separate run submitted through the deployed web API on Ubuntu 24.04 also completed at 10 workers:
+
+- API: 30/30 successful, exactly 30 attempts, no truncation; first content P50 0.88 s, first body P50 4.58 s, estimated output TPS P50 284.49, wall time 27.04 s.
+- Quick40: 39/40, exactly 40 attempts, no API errors; the failed case was `gpqa/gpqa_diamond/30`, distinct from the GitHub run. Wall time 94.85 s. Stochastic responses can change individual outcomes.
+- Public HTTPS was checked with certificate verification enabled. Authenticated task listing, reports and ZIP downloads worked; unauthenticated requests were rejected, HTTPS cookies carried Secure/HttpOnly, and queue cancellation was verified.
+- A trusted Let's Encrypt IP certificate replaced the blocked temporary domain. Twice-daily automatic renewal is enabled and its dry run succeeded.
+
+These server timings are separate observations from the GitHub run. Browser visual inspection was not completed because permission to open the preview was denied; backend integration and HTTPS checks do not substitute for a visual review.
