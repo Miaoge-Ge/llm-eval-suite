@@ -74,6 +74,18 @@ jobs:
         run: |
           uv run --frozen python -c "from pathlib import Path; Path('.pytest_cache').mkdir(exist_ok=True)"
           uv run --frozen pytest tests/integration/test_docker_integration.py tests/integration/test_lightweight_suites.py::test_full_quick40_reference_run_resume_and_offline_grading --basetemp .pytest_cache/docker --junitxml=results/ci/docker.xml
+      - name: Build native production service
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config libcpp-httplib-dev nlohmann-json3-dev libcurl4-openssl-dev libssl-dev
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j2
+          ctest --test-dir build --output-on-failure
+      - name: Native HTTP, failure accounting and full Docker grading
+        env:
+          LLM_EVAL_DOCKER_TESTS: "1"
+          LLM_EVAL_NATIVE_BINARY: ${{ github.workspace }}/build/server/llm-eval-server
+        run: uv run --frozen pytest tests/native --basetemp .pytest_cache/native --junitxml=results/ci/native.xml
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -44,6 +44,8 @@ def request_metrics(
     metrics = {
         "attempted": True,
         "request_concurrency": attempt.get("request_concurrency"),
+        "scheduler_wait_seconds": attempt.get("scheduler_wait_seconds"),
+        "shared_request_limit": attempt.get("shared_request_limit"),
         "success": success,
         "first_content_seconds": meaningful[0]["at_seconds"] if meaningful else None,
         "first_body_seconds": first_body,
@@ -147,6 +149,7 @@ def summarize_experience(results: list[dict[str, Any]], *, concurrency: int = 1)
             "max_gap_seconds",
             "output_tps_estimate",
             "characters_per_second",
+            "scheduler_wait_seconds",
         )
         return {
             "planned": len(rows),

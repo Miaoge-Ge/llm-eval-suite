@@ -15,8 +15,8 @@
         ><span>LLM Eval Suite</span>
       </div>
       <form id="login-form" class="login-form">
-        <p class="login-note">你的模型评测工作台</p>
-        <h1>开始一次有依据的评测。</h1>
+        <p class="login-note">管理员入口</p>
+        <h1>管理你的评测服务。</h1>
         <p class="muted">
           Benchmark 性能与 API 服务质量，在同一个地方测量、比较和复查。
         </p>
@@ -30,9 +30,14 @@
         />
         <p id="login-error" class="error-message" role="alert"></p>
         <button class="primary" type="submit">
-          登录工作台 <span aria-hidden="true">↗</span>
+          管理员登录 <span aria-hidden="true">↗</span>
         </button>
-        <p class="login-foot">仅授权访问。模型密钥不会显示在报告里。</p>
+        <button id="guest-entry" class="quiet" type="button">
+          返回免注册工作台
+        </button>
+        <p class="login-foot">
+          日常评测无需注册或登录；管理员可使用服务器默认密钥。
+        </p>
       </form>
       <div class="login-art" aria-hidden="true">
         <div class="wave wave-a"></div>
@@ -68,7 +73,7 @@
       </aside>
       <main>
         <header class="topbar">
-          <span>模型评测工作台</span>
+          <span>本浏览器的私有工作区</span>
           <div>
             <span class="connection"
               ><span class="status-dot"></span>已连接</span
@@ -274,11 +279,12 @@
             </div>
             <section class="history-section">
               <div class="history-heading">
-                <h2>历史评测</h2>
+                <h2>我的历史评测</h2>
                 <button id="refresh-history" class="quiet">刷新</button>
               </div>
               <p id="empty-history" class="muted">
-                尚无评测记录。完成一次测试后，可在这里重新打开报告。
+                本浏览器尚无评测记录。请保留浏览器
+                Cookie；清除后无法找回原来的工作区。
               </p>
               <div id="history" class="history-list"></div>
             </section>

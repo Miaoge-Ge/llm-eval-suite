@@ -1,5 +1,5 @@
 [Unit]
-Description=LLM Eval Suite web workbench
+Description=LLM Eval Suite native multi-user workbench
 After=network-online.target docker.service
 Wants=network-online.target
 Requires=docker.service
@@ -12,10 +12,14 @@ SupplementaryGroups=docker
 WorkingDirectory=/opt/llm-eval-suite
 EnvironmentFile=/etc/llm-eval-suite.env
 Environment=LLM_EVAL_STATE_DIR=/var/lib/llm-eval-suite
-Environment=LLM_EVAL_HOST=127.0.0.1
+Environment=LLM_EVAL_ROOT=/opt/llm-eval-suite
+Environment=LLM_EVAL_PYTHON=/opt/llm-eval-suite/.venv/bin/python
 Environment=LLM_EVAL_PORT=8080
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/llm-eval-suite/.venv/bin/llm-eval-web
+Environment=LLM_EVAL_MAX_RUNNING_JOBS=20
+Environment=LLM_EVAL_REQUEST_CAPACITY=40
+Environment=LLM_EVAL_EXECUTION_CAPACITY=4
+ExecStart=/opt/llm-eval-suite/build/server/llm-eval-server
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=150

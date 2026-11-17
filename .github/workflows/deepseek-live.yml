@@ -1,5 +1,5 @@
 name: DeepSeek live evaluation
-run-name: DeepSeek Flash - 10 workers, 30 API requests and 40 benchmark cases
+run-name: Native C++ - DeepSeek Flash, 10 workers, 30 API requests and 40 benchmark cases
 
 on:
   workflow_dispatch:
@@ -35,16 +35,17 @@ jobs:
           fi
       - name: Prepare Plus execution image
         run: docker build -t llm-eval-python:3.12-numpy2.2.6 -f docker/Dockerfile.numpy docker
-      - name: API experience - 30 requests, 10 workers, no retries
-        id: api
+      - name: Build native service
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config libcpp-httplib-dev nlohmann-json3-dev libcurl4-openssl-dev libssl-dev
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j2
+          ctest --test-dir build --output-on-failure
+      - name: Native API30 and complete Quick40
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-        run: uv run --frozen llm-eval api --config configs/deepseek.ci.yaml --workers 10
-      - name: Quick40 - full benchmark tests
-        if: ${{ !cancelled() && steps.api.outcome != 'skipped' }}
-        env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-        run: uv run --frozen llm-eval benchmark --task quick40 --config configs/deepseek.ci.yaml --workers 10
+        run: uv run --frozen python scripts/native/live_evaluation.py --binary build/server/llm-eval-server --output results/deepseek-flash
       - name: Publish evaluation summaries
         if: always()
         run: |

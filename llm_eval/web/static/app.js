@@ -8,6 +8,8 @@ const state = {
   selected: null,
   timer: null,
   busy: false,
+  snapshots: new Map(),
+  historyRead: 0,
 };
 const names = {
   QUEUED: "排队中",
@@ -56,7 +58,7 @@ async function api(path, options = {}) {
     ...options,
     headers: { "Content-Type": "application/json", ...options.headers },
   });
-  if (!response.ok) {
+  if (!response.ok && response.status !== 304) {
     const data = await response.json().catch(() => ({}));
     if (response.status === 401 && path !== "/login") showLogin();
     throw new Error(
@@ -277,7 +279,7 @@ function renderJob(job) {
   }
   const finished = !running.has(job.status);
   $("show-report").hidden = !finished || !summary;
-  $("download").hidden = !job.progress && !summary;
+  $("download").hidden = !finished || (!job.progress && !summary);
   $("download").href = `/api/jobs/${job.id}/artifacts`;
   $("case-rows").replaceChildren();
   $("cases-section").hidden = rows.length === 0;
@@ -302,18 +304,27 @@ function renderJob(job) {
 }
 async function loadJob(id) {
   try {
-    const job = await (await api(`/jobs/${id}`)).json();
+    const cached = state.snapshots.get(id);
+    const response = await api(`/jobs/${id}`, {
+      headers: cached ? { "If-None-Match": cached.etag } : {},
+    });
+    const job = response.status === 304 ? cached.job : await response.json();
+    if (response.status !== 304)
+      state.snapshots.set(id, { etag: response.headers.get("ETag"), job });
     if (state.selected === id) renderJob(job);
   } catch (error) {
     $("job-error").textContent = error.message;
   }
 }
-async function refresh() {
+async function refresh(force = false) {
   clearTimeout(state.timer);
   if ($("workspace").hidden) return;
   try {
-    state.jobs = await (await api("/jobs")).json();
-    renderHistory();
+    if (force || performance.now() - state.historyRead > 10000) {
+      state.jobs = await (await api("/jobs")).json();
+      state.historyRead = performance.now();
+      renderHistory();
+    }
     if (state.selected) await loadJob(state.selected);
     else if (state.jobs.some((job) => job.mode === state.mode)) {
       state.selected = state.jobs.find((job) => job.mode === state.mode).id;
@@ -325,11 +336,16 @@ async function refresh() {
   }
   if (!$("workspace").hidden)
     state.timer = setTimeout(
-      refresh,
-      state.jobs.some((job) => running.has(job.status)) ? 2000 : 8000,
+      () => refresh(),
+      state.jobs.some((job) => running.has(job.status)) ? 2000 : 15000,
     );
 }
 async function initialize() {
+  await api("/session", { method: "POST" });
+  state.jobs = [];
+  state.selected = null;
+  state.snapshots.clear();
+  state.historyRead = 0;
   state.config = await (await api("/config")).json();
   $("base-url").value = state.config.base_url;
   $("model").value = state.config.model;
@@ -343,6 +359,12 @@ async function initialize() {
     option.disabled = !task.available;
     $("task").append(option);
   }
+  $("logout").textContent =
+    state.config.role === "admin" ? "退出管理" : "管理入口";
+  $("key-optional").textContent = "必填";
+  $("api-key").required = !state.config.server_key_available;
+  $("api-key").placeholder = "填写你自己的模型 API 密钥";
+  $("key-help").textContent = "无需注册。密钥只用于你的任务，不写入评测记录。";
   if (state.config.server_key_available) {
     $("key-optional").textContent = "可选";
     $("api-key").placeholder = "留空使用服务器密钥";
@@ -353,7 +375,7 @@ async function initialize() {
   $("workspace").hidden = false;
   configureTask();
   setMode(state.mode);
-  await refresh();
+  await refresh(true);
 }
 $("login-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -401,7 +423,7 @@ $("evaluation-form").addEventListener("submit", async (event) => {
     ).json();
     state.selected = job.id;
     $("api-key").value = "";
-    await refresh();
+    await refresh(true);
   } catch (error) {
     $("form-error").textContent = error.message;
   } finally {
@@ -413,7 +435,7 @@ $("cancel-button").addEventListener("click", async () => {
   if (!state.selected) return;
   try {
     await api(`/jobs/${state.selected}/cancel`, { method: "POST" });
-    await refresh();
+    await refresh(true);
   } catch (error) {
     $("job-error").textContent = error.message;
   }
@@ -430,12 +452,18 @@ $("show-report").addEventListener("click", async () => {
 });
 $("close-report").addEventListener("click", () => $("report-dialog").close());
 $("logout").addEventListener("click", async () => {
-  try {
-    await api("/logout", { method: "POST" });
-  } finally {
+  if (state.config.role !== "admin") {
     showLogin();
+    return;
   }
+  await api("/logout", { method: "POST" });
+  await initialize();
 });
+$("guest-entry").addEventListener("click", () =>
+  initialize().catch((error) => {
+    $("login-error").textContent = error.message;
+  }),
+);
 $("refresh-history").addEventListener("click", refresh);
 $("task").addEventListener("change", configureTask);
 document

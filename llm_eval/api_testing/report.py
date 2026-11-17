@@ -32,6 +32,9 @@ def render_experience(summary: RunSummary, config: FrameworkConfig, results: lis
         "Length-limited responses are counted as completed streams and separately marked truncated.",
         "All times are measured at the client, including network and channel delays. TTFT is the first "
         "non-whitespace content or reasoning; first body excludes reasoning. Empty role packets do not count.",
+        "On the shared web service, scheduler_wait_seconds measures waiting for an HTTP worker before "
+        "the request starts. It is reported separately from API latency; shared_request_limit is the "
+        "service-wide cap, while request_concurrency is this job's requested maximum.",
         "",
         "## Scenario metrics",
         "",

@@ -2,7 +2,7 @@
 
 [中文文档](README_CN.md) · [CLI reference](docs/reference.md) · [Web deployment](docs/deployment.md)
 
-Evaluate model capability and API service quality through OpenAI-compatible endpoints, from the CLI or an authenticated web workbench. Every run preserves answers, configuration, timings and grading evidence.
+Evaluate model capability and API service quality through OpenAI-compatible endpoints, from the CLI or a registration-free web workbench. Every run preserves answers, configuration, timings and grading evidence.
 
 | Function | Status | Measures |
 | --- | --- | --- |
@@ -32,14 +32,20 @@ Full tasks: `humaneval`, `humanevalplus`, `mbpp`, `mbppplus`, `gsm`, `aime2025`,
 
 ## Web workbench
 
+The production web service uses C++20 on Linux for HTTP, signed anonymous sessions, scheduling and model HTTP/SSE requests. Existing Python benchmark graders and isolated Python code execution preserve the scoring rules. Build dependencies and HTTPS setup are in the [deployment guide](docs/deployment.md).
+
 ```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j2
 export LLM_EVAL_ADMIN_PASSWORD='choose-a-long-private-password'
 export LLM_EVAL_SESSION_SECRET="$(python -c 'import secrets; print(secrets.token_hex(32))')"
 # Optional: DEEPSEEK_API_KEY supplies the default DeepSeek endpoint only.
 uv run --extra web llm-eval-web
 ```
 
-Open `http://127.0.0.1:8080`. Configure tests, view progress, cancel tasks, browse history, open reports and export ZIP records. One job runs at a time, with up to 10 workers and five active/queued jobs. Custom API keys remain in process memory. The default server key belongs in a protected environment file. Public deployments use HTTPS; [systemd and Caddy instructions](docs/deployment.md) are included.
+Open `http://127.0.0.1:8080`. Visitors enter without registering and supply their own model API key. A signed, random browser cookie identifies the workspace for 30 days; every list, detail, report, download and cancellation checks ownership. IP addresses are only used for rate limiting. Tabs in the same browser share a workspace; clearing cookies or switching browsers loses access to previous anonymous jobs. There is no account recovery.
+
+Defaults: 20 running jobs, 40 model requests, four scoring processes, 200 active/queued jobs, and two active/queued jobs per visitor. Each job requests at most 10 workers. Shared resources may cause queueing; request scheduling delay is reported separately from API latency. A 4-core/4-GB host is not a promise of 100 independent CPU-heavy evaluations at once. Custom API keys remain in memory and never enter scoring processes. The administrator can use the protected server default key. Public deployments require HTTPS.
 
 ## Measurement rules
 
@@ -63,12 +69,15 @@ llm_eval/
   api_testing/        # API suite, streaming metrics, quality reports
   model_verification/ # roadmap only
   core/               # shared clients, runner, execution, storage
-  web/                # FastAPI service and browser UI
+  web/                # browser UI, native launcher; legacy baseline retained
+  native_bridge.py    # official scoring and archive RPC (no model credentials)
   cli.py              # command entry points
   tasks.py            # public task registry
+server/               # C++20 HTTP, auth, queue, libcurl SSE and scorer pool
 datasets/benchmark/   # original benchmark data
 scripts/benchmark/    # dataset import / fixed suite construction
 scripts/api_testing/  # API suite construction
+scripts/native/       # real-model validation through the C++ service
 tests/                # core, benchmark, API, integration, web
 configs/              # secret-free templates and DeepSeek CI profile
 deploy/               # service and reverse-proxy templates
@@ -80,7 +89,7 @@ docs/                 # CLI and deployment reference
 [2026-11-17 validation results](docs/validation-2026-11-17.md): API 30/30 successful; Quick40 39/40, with the remaining instruction-following failure retained.
 
 
-Ordinary CI runs Linux/Windows regression tests, Ruff, mypy and real Docker integration tests without model credentials. Manually dispatch **DeepSeek live evaluation** with repository secret `DEEPSEEK_API_KEY` to run 30 API requests followed by all 40 benchmark cases, both with **10 workers**.
+Ordinary CI runs Linux/Windows regression tests, Ruff, mypy and real Docker integration tests, a Release C++ build, and native HTTP failure/isolation tests without model credentials. Manually dispatch **DeepSeek live evaluation** with repository secret `DEEPSEEK_API_KEY` to run the C++ production service for 30 API requests followed by all 40 benchmark cases, both with **10 workers**.
 
 The DeepSeek profile explicitly enables thinking and uses a **16,384-token shared reasoning/body budget**. The first live run exhausted smaller budgets during reasoning; that failed run remains in Actions. Prompts and target answer lengths are unchanged. Comparisons must use the same settings; timings reflect the runner's network.
 

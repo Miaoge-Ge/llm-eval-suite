@@ -122,9 +122,18 @@ class ExecutionEngine:
 
     def _docker_command(self, name: str, worker: str) -> list[str]:
         cfg = self.config
+        labels: list[str] = []
+        for environment_name, label in (
+            ("LLM_EVAL_SERVICE_ID", "llm-eval.service"),
+            ("LLM_EVAL_JOB_ID", "llm-eval.job"),
+            ("LLM_EVAL_GRADER_ID", "llm-eval.grader"),
+        ):
+            if os.getenv(environment_name):
+                labels.extend(("--label", f"{label}={os.environ[environment_name]}"))
         return [
             "docker",
             "create",
+            *labels,
             "--name",
             name,
             "--pull",

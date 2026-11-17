@@ -32,14 +32,20 @@ PowerShell 使用 `Copy-Item` 复制文件，用 `$env:OPENAI_API_KEY = '你的�
 
 ## 网页工作台
 
+生产网页使用 Linux C++20 服务：网页 HTTP、匿名会话、任务调度、模型 HTTP/SSE 请求均由 C++ 执行。既有 Python 官方评分器和代码题沙箱保留，保证评分规则不变。构建依赖和 HTTPS 配置见 [部署说明](docs/deployment.md)。
+
 ```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j2
 export LLM_EVAL_ADMIN_PASSWORD='设置足够长的私有访问密码'
 export LLM_EVAL_SESSION_SECRET="$(python -c 'import secrets; print(secrets.token_hex(32))')"
 # 可选：设置 DEEPSEEK_API_KEY，供默认 DeepSeek 地址使用。
 uv run --extra web llm-eval-web
 ```
 
-访问 `http://127.0.0.1:8080`，登录后可配置测试、查看逐题进度、停止任务、打开历史报告、下载原始记录。同一时间执行一个任务，每个任务最多 10 并发，运行及排队任务最多五个。模型验证页标注“开发中”。自定义密钥仅驻留内存；服务器默认密钥放在受保护的环境文件中。公网部署使用 HTTPS，详见 [部署说明](docs/deployment.md)。
+访问 `http://127.0.0.1:8080` 即可免注册进入。访客填写自己的 API 密钥；管理员登录后可使用服务器默认密钥。服务端签名的随机 Cookie 标识本浏览器，30 天有效，每次查询、下载、取消都校验任务归属。IP 只用于限流，同一 IP 下的不同浏览器不会共享记录。同一浏览器的多个标签页共享工作区；清 Cookie 或换浏览器后无法找回旧匿名任务。
+
+默认最多 20 个运行任务、40 个模型请求、4 个评分进程、200 个运行及排队任务；每位访客最多 2 个运行及排队任务，每任务最多 10 workers。资源共享时会排队，调度等待与 API 延迟分别记录。4 核 / 4 GB 主机不能保证 100 个 CPU 密集评测同时独占资源。密钥仅在内存中使用，不传入评分进程。公网部署使用 HTTPS。
 
 ## 评测规则
 
@@ -63,12 +69,15 @@ llm_eval/
   api_testing/        # API 固定题包、流式指标、质量报告
   model_verification/ # 规划说明，尚未实现
   core/               # 共用客户端、调度、执行、存储
-  web/                # FastAPI 服务与网页界面
+  web/                # 网页、原生服务启动器；保留旧服务作基线
+  native_bridge.py    # 官方评分与归档 RPC，不接收模型密钥
   cli.py              # 命令入口
   tasks.py            # 公开任务注册表
+server/               # C++20 HTTP、会话、调度、流式请求、评分池
 datasets/benchmark/   # 原始 benchmark 数据
 scripts/benchmark/    # 导入题库、构建固定题包
 scripts/api_testing/  # 构建 API 题包
+scripts/native/       # 经 C++ 服务进行真实模型验证
 tests/                # 按功能分类，另含集成与网页测试
 configs/              # 无密钥示例、DeepSeek CI 配置
 deploy/               # systemd、Caddy 模板
@@ -80,7 +89,7 @@ docs/                 # CLI、部署参考
 [2026-11-17 验证结果](docs/validation-2026-11-17.md)：API 30/30 成功，Quick40 39/40，保留真实的指令遵循失败。
 
 
-普通 CI 包括 Linux/Windows 回归、Ruff、mypy、真实 Docker 测试，不调用模型。手动运行 **DeepSeek live evaluation** 工作流时，从 Secret `DEEPSEEK_API_KEY` 读取密钥，先跑 30 次 API 测试，再跑全部 40 道能力题，两者均为 **10 workers**。
+普通 CI 包括 Linux/Windows 回归、Ruff、mypy、真实 Docker、C++ Release 构建及原生 HTTP 权限/失败统计测试，不调用模型。手动运行 **DeepSeek live evaluation** 工作流时，从 Secret `DEEPSEEK_API_KEY` 读取密钥，通过 C++ 生产服务先跑 30 次 API 测试，再跑全部 40 道能力题，两者均为 **10 workers**。
 
 DeepSeek 配置显式启用思考，思考与正文共享 **16,384 token** 输出预算。首轮实测因预算过小，在思考阶段耗尽额度，失败记录保留在 Actions 中。增加预算不改变原题及要求回答的长度；横向对比需要使用同一设置。计时反映运行机器的网络条件。
 
