@@ -34,3 +34,20 @@ thinking_enabled: false
 
 # Optional: low | medium | high | max (only sent when thinking_enabled is true).
 reasoning_effort:
+
+# Lightweight modes:
+#   uv run llm-eval api-test --config configs/my-model.yaml
+#   uv run llm-eval quick-test --config configs/my-model.yaml
+# Both default to one worker; api-test always enforces one and disables retries.
+# quick-test defaults to 4096 output tokens. api-test uses scenario caps 256/768/256.
+# Optional override (use the same value for every channel in a comparison):
+# max_output_tokens: 4096
+# output_token_parameter: max_completion_tokens  # default: max_tokens
+# Optional sampling settings; omitted values use provider defaults:
+# temperature: 0
+# seed: 42
+# API measurement settings (seconds). SLO thresholds are optional, not universal ratings.
+# stall_threshold_seconds: 1.0
+# slo_ttft_seconds: 2.0       # first visible BODY, excludes reasoning
+# slo_tps: 20.0              # estimated visible output tokens/s
+# slo_max_gap_seconds: 1.0

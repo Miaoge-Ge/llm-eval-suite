@@ -23,7 +23,9 @@ from .ifeval import evaluate as evaluate_ifeval
 from .livecodebench import iter_private_tests, outputs_match, prepare_assets, validate_tests
 from .plus import prepare_test_code
 from .settings import NUMPY_VERSION, FrameworkConfig
-from .status import Status
+from .status import ERROR_STATUSES, GRADED_STATUSES, Status
+from .stream_metrics import request_metrics, summarize_experience
+from .suite_data import load_suite, selected_rows
 from .utils import load_jsonl
 
 DEFAULT_TASK_NAME = "humaneval"
@@ -66,6 +68,7 @@ class BaseEvaluationTask(ABC):
     task_name: str = ""
     requires_execution = False
     requires_numpy = False
+    can_grade_failed_generations = False
     # Looked up in order to build a case id; falls back to the row index.
     id_fields: tuple[str, ...] = ("id",)
 
@@ -99,7 +102,7 @@ class BaseEvaluationTask(ABC):
                 self.check_ready()
             except ExecutionUnavailable as exc:
                 return TaskResult(case.case_id, Status.EXECUTION_ERROR, 0.0, error=str(exc))
-        generation = client.generate(self.build_messages(case))
+        generation = client.generate(self.build_messages(case), **self.generation_options(case))
         if generation.error:
             return self._api_error_result(case, started_at, generation)
         return self.grade_case(case, generation, started_at)
@@ -117,6 +120,15 @@ class BaseEvaluationTask(ABC):
         return None
 
     def coverage_info(self, cases: list[TaskCase]) -> dict[str, Any]:
+        return {}
+
+    def generation_options(self, case: TaskCase) -> dict[str, Any]:
+        return {}
+
+    def case_metadata(self, case: TaskCase) -> dict[str, Any]:
+        return {}
+
+    def summarize(self, results: list[dict[str, Any]]) -> dict[str, Any]:
         return {}
 
     @abstractmethod
@@ -667,3 +679,135 @@ class LiveCodeBenchTask(BaseEvaluationTask):
         if not count:
             return Status.INTERNAL_ERROR, "Dataset case has no tests"
         return Status.PASSED, ""
+
+
+class Quick40Task(BaseEvaluationTask):
+    """Original prompts and full existing graders, selected by a pinned manifest."""
+
+    task_name = "quick40"
+    requires_execution = True
+    requires_numpy = True
+
+    def load_cases(self) -> list[TaskCase]:
+        manifest = load_suite(self.dataset_path, "quick40-v1", 40)
+        rows = selected_rows(manifest)
+        for dimension in ("code", "math", "knowledge", "instructions"):
+            if sum(row["dimension"] == dimension for row in rows) != 10:
+                raise ValueError("quick40 must contain ten cases per dimension")
+        return [TaskCase(row["id"], row) for row in rows]
+
+    def _delegate(self, case: TaskCase) -> tuple[BaseEvaluationTask, TaskCase]:
+        name = case.payload["source_task"]
+        if name not in {"humanevalplus", "mbppplus", "gsm", "aime2025", "mmlu_pro", "gpqa", "ifeval"}:
+            raise ValueError(f"Unsupported quick40 source: {name}")
+        delegate = TASK_REGISTRY[name](self.config)
+        delegate.executor = self.executor
+        return delegate, TaskCase(case.payload["source_id"], case.payload["source_case"])
+
+    def validate_case(self, case: TaskCase) -> str | None:
+        task, original = self._delegate(case)
+        return task.validate_case(original)
+
+    def build_messages(self, case: TaskCase) -> list[dict[str, str]]:
+        task, original = self._delegate(case)
+        return task.build_messages(original)
+
+    def grade_case(self, case: TaskCase, generation: GenerationResult, started_at: float | None = None) -> TaskResult:
+        task, original = self._delegate(case)
+        result = task.grade_case(original, generation, started_at)
+        result.case_id = case.case_id
+        result.metadata.update(self.case_metadata(case))
+        finish = generation.attempt_records[-1].get("finish_reason") if generation.attempt_records else None
+        result.metadata["truncated"] = finish == "length"
+        return result
+
+    def case_metadata(self, case: TaskCase) -> dict[str, Any]:
+        return {key: case.payload[key] for key in ("dimension", "source_task", "source_id", "suite_version", "reason")}
+
+    def summarize(self, results: list[dict[str, Any]]) -> dict[str, Any]:
+        dimensions = {}
+        for dimension in ("code", "math", "knowledge", "instructions"):
+            rows = [row for row in results if row.get("metadata", {}).get("dimension") == dimension]
+            dimensions[dimension] = {
+                "planned": 10,
+                "passed": sum(row["status"] == Status.PASSED for row in rows),
+                "graded": sum(row["status"] in GRADED_STATUSES for row in rows),
+                "errors": sum(row["status"] in ERROR_STATUSES for row in rows),
+                "cancelled": sum(row["status"] == Status.CANCELLED for row in rows),
+                "truncated": sum(bool(row.get("metadata", {}).get("truncated")) for row in rows),
+            }
+        return {
+            "suite_version": "quick40-v1",
+            "dimensions": dimensions,
+            "interpretation": "Curated coverage sample; not a calibrated benchmark or model ranking.",
+        }
+
+
+class ApiExperienceTask(BaseEvaluationTask):
+    task_name = "api_experience"
+    can_grade_failed_generations = True
+
+    def load_cases(self) -> list[TaskCase]:
+        manifest = load_suite(self.dataset_path, "api-experience-v1", 30)
+        rows = manifest["cases"]
+        for scenario in ("short_answer", "long_answer", "long_context"):
+            if sum(row["scenario"] == scenario for row in rows) != 10:
+                raise ValueError("API experience must contain ten cases per scenario")
+        return [TaskCase(row["id"], row) for row in rows]
+
+    def build_messages(self, case: TaskCase) -> list[dict[str, str]]:
+        return case.payload["messages"]
+
+    def generation_options(self, case: TaskCase) -> dict[str, Any]:
+        run = self.config.run
+        return {
+            "max_attempts": 1,
+            "capture_timing": True,
+            "parameters": {run.output_token_parameter: run.max_output_tokens or case.payload["max_output_tokens"]},
+        }
+
+    def case_metadata(self, case: TaskCase) -> dict[str, Any]:
+        return {
+            "scenario": case.payload["scenario"],
+            "suite_version": "api-experience-v1",
+            "reference_input_tokens": case.payload["reference_input_tokens"],
+            "reference_tokenizer": "cl100k_base",
+            "target_output_tokens": case.payload["target_output_tokens"],
+        }
+
+    def _metrics(self, generation: GenerationResult) -> dict[str, Any]:
+        if not generation.attempt_records:
+            return {"attempted": False}
+        run = self.config.run
+        return request_metrics(
+            generation.attempt_records[0],
+            thinking=run.thinking_enabled,
+            stall_threshold=run.stall_threshold_seconds,
+            slo={"ttft_seconds": run.slo_ttft_seconds, "tps": run.slo_tps, "max_gap_seconds": run.slo_max_gap_seconds},
+        )
+
+    def grade_case(self, case: TaskCase, generation: GenerationResult, started_at: float | None = None) -> TaskResult:
+        metrics = self._metrics(generation)
+        return self._usage_result(
+            case,
+            started_at or time.time(),
+            generation,
+            Status.PASSED if metrics.get("success") else Status.API_ERROR,
+            metadata={"experience": metrics},
+        )
+
+    def _usage_result(
+        self,
+        case: TaskCase,
+        started_at: float,
+        generation: GenerationResult,
+        status: str,
+        **kwargs: Any,
+    ) -> TaskResult:
+        result = super()._usage_result(case, started_at, generation, status, **kwargs)
+        # An observed request still counts if persisting or processing its answer fails.
+        result.metadata["experience"] = self._metrics(generation)
+        return result
+
+    def summarize(self, results: list[dict[str, Any]]) -> dict[str, Any]:
+        return summarize_experience(results)

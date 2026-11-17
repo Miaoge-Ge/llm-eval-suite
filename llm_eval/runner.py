@@ -32,6 +32,17 @@ class EvaluationRunner:
         if operation not in {"run", "generate", "grade"}:
             raise ValueError(f"Unsupported operation: {operation}")
         self.config = config
+        if config.run.task in {"quick40", "api_experience"} and config.run.limit is not None:
+            raise ValueError("Fixed suites do not support --limit; use an individual source task for subsets")
+        if config.run.task == "api_experience":
+            if config.run.workers != 1:
+                raise ValueError("API experience requires exactly one worker")
+            if resume_dir:
+                raise ValueError(
+                    "API timing sessions cannot be resumed; start a new 30-request session or grade offline"
+                )
+            if operation == "generate":
+                raise ValueError("Use api-test to capture and report API experience in one session")
         self.operation = operation
         self.resume_dir = resume_dir.resolve() if resume_dir else None
         self.source_dir = source_dir.resolve() if source_dir else None
@@ -154,6 +165,7 @@ class EvaluationRunner:
                 if index in results:
                     return
                 result.case_index = index
+                result.metadata.update(task.case_metadata(cases[index]))
                 payload = result.to_dict()
                 writer.write_result(payload)
                 results[index] = payload
@@ -296,7 +308,10 @@ class EvaluationRunner:
                 source_run=str(self.source_dir) if self.source_dir else None,
                 incomplete_usage_cases=incomplete_usage_cases,
                 test_coverage=task.coverage_info(cases),
+                metrics=task.summarize(payloads),
             )
+            if self.config.run.task == "api_experience":
+                summary = replace(summary, pass_rate=summary.metrics["overall"]["first_attempt_success_rate"] or 0.0)
             writer.finalize_results(payloads)
             writer.write_report(render_markdown_report(summary, self.config, payloads))
             writer.write_summary(summary)
@@ -312,7 +327,10 @@ class EvaluationRunner:
                 return TaskResult(case.case_id, Status.INTERNAL_ERROR, 0.0, error=error)
             assert self.archive is not None
             saved = self.archive.latest.get(index)
-            if saved and not saved["generation"]["error"] and not saved["generation"]["cancelled"]:
+            if saved and (
+                task.can_grade_failed_generations
+                or (not saved["generation"]["error"] and not saved["generation"]["cancelled"])
+            ):
                 generation = GenerationResult(**saved["generation"])
             elif self.operation == "grade":
                 return TaskResult(
@@ -324,13 +342,14 @@ class EvaluationRunner:
             else:
                 messages = task.build_messages(case)
                 generation_started = time.monotonic()
-                generation = self._get_client().generate(messages)
+                options = task.generation_options(case)
+                generation = self._get_client().generate(messages, **options)
                 try:
                     saved = self.archive.save_generation(
                         index,
                         messages,
                         generation,
-                        request_parameters(self.config),
+                        {**request_parameters(self.config), **options.get("parameters", {})},
                         time.monotonic() - generation_started,
                     )
                 except OSError as exc:

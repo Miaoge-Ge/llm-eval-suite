@@ -5,6 +5,7 @@ import pytest
 from openai import OpenAI
 
 from llm_eval.clients import OpenAICompatibleClient
+from llm_eval.stream_metrics import request_metrics
 
 
 @pytest.fixture
@@ -206,3 +207,48 @@ def test_cancel_at_stream_eof_does_not_accept_partial_answer(client_factory):
     assert result.cancelled
     assert result.error
     assert result.attempts == 1
+
+
+@pytest.mark.parametrize("failure", [429, 500, 408, 409, "timeout", "connect", "disconnect", "empty", "eof"])
+def test_timing_requests_never_retry_failures(client_factory, failure):
+    calls = []
+    streams = []
+
+    class BrokenStream(httpx.SyncByteStream):
+        closed = False
+
+        def __iter__(self):
+            yield sse("partial", usage=False, finish_reason=None)
+            raise httpx.ReadError("connection broke")
+
+        def close(self):
+            self.closed = True
+
+    def handler(request):
+        calls.append(request)
+        if isinstance(failure, int):
+            return httpx.Response(failure, json={"error": {"message": "failed"}})
+        if failure == "timeout":
+            raise httpx.ReadTimeout("timed out", request=request)
+        if failure == "connect":
+            raise httpx.ConnectError("unreachable", request=request)
+        if failure == "disconnect":
+            stream = BrokenStream()
+            streams.append(stream)
+            return httpx.Response(200, stream=stream)
+        return httpx.Response(
+            200,
+            content=sse("" if failure == "empty" else "partial", finish_reason=None if failure == "eof" else "stop"),
+        )
+
+    client = client_factory(handler)
+    result = client.generate([], max_attempts=1, capture_timing=True)
+    assert result.error and len(calls) == result.attempts == len(result.attempt_records) == 1
+    attempt = result.attempt_records[0]
+    metrics = request_metrics(attempt, thinking=False, stall_threshold=1, slo={})
+    assert not metrics["success"]
+    assert metrics["end_to_end_seconds"] >= 0
+    if failure in ("disconnect", "eof"):
+        assert result.content == "partial"
+        assert attempt["timing"]["events"][0]["content"] == "partial"
+    assert all(stream.closed for stream in streams)

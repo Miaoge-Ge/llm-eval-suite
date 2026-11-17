@@ -340,7 +340,11 @@ uv run pytest          # 运行测试
 
 ```powershell
 $env:LLM_EVAL_DOCKER_TESTS = "1"
-uv run pytest tests/test_docker_integration.py
+uv run pytest tests/test_docker_integration.py tests/test_lightweight_suites.py
 ```
 
 未启用时容器集成测试显示为跳过；模拟 Docker 调用的测试不能替代真实容器验证。
+
+`test_lightweight_suites.py` 同时覆盖固定题包、30 次请求的无重试统计，以及真实 Docker 下的 40 题参考答案评分、续跑和离线重评分。API 错误使用模拟 HTTP 服务注入，不消耗真实模型额度。
+
+Windows 沙箱的默认临时目录可能过长，导致文件读写报 `FileNotFoundError`。可为测试指定项目内的短目录，例如 `uv run pytest --basetemp .pytest_cache/run-tmp`。该目录仅存放测试临时文件，pytest 会清空它。

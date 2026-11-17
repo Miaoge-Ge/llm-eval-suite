@@ -17,6 +17,15 @@ from .tasks import DEFAULT_TASK_NAME, TASK_REGISTRY
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="llm-eval", description="Engineering-first LLM evaluation framework")
     subparsers = parser.add_subparsers(dest="command")
+    for command, task, help_text in (
+        ("api-test", "api_experience", "30 streaming requests, one worker, no retries"),
+        ("quick-test", "quick40", "Fixed 40 original-language benchmark cases"),
+    ):
+        sub = subparsers.add_parser(command, help=help_text)
+        sub.add_argument("--config", default="configs/model.yaml", help="Model config YAML")
+        sub.set_defaults(task=task, workers=1, limit=None, resume=None)
+        if command == "quick-test":
+            sub.add_argument("--workers", type=int, default=1)
     for command, help_text in (
         ("run", "Generate and grade"),
         ("generate", "Save model answers without executing grading"),
@@ -107,7 +116,11 @@ def main(argv: list[str] | None = None) -> int:
                 if args.limit is not None
                 else (resume_manifest["config"]["run"]["limit"] if resume_manifest else None),
             )
-            operation = resume_manifest["operation"] if resume_manifest else args.command
+            operation = (
+                resume_manifest["operation"]
+                if resume_manifest
+                else ("run" if args.command in {"api-test", "quick-test"} else args.command)
+            )
             runner = EvaluationRunner(config, operation=operation, resume_dir=resume_dir)
     except (OSError, ValueError, KeyError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -128,6 +141,15 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _render_summary(summary: RunSummary, report_path: Path) -> str:
+    if summary.task == "api_experience":
+        metrics = summary.metrics.get("overall", {})
+        return (
+            f"API experience: {summary.run_status}\n"
+            f"Attempted: {metrics.get('attempted', 0)}/30; "
+            f"successful streams: {metrics.get('successful', 0)}; truncated: {metrics.get('truncated', 0)}\n"
+            f"First-attempt success rate: {metrics.get('first_attempt_success_rate')}\n"
+            f"Report: {report_path}"
+        )
     lines = [
         "=" * 60,
         "LLM Evaluation Summary",

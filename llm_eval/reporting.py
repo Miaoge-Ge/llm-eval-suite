@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from .artifacts import RunLock, encode_json, write_atomic, write_json
+from .experience_report import render_experience
 from .settings import FrameworkConfig
 from .status import ERROR_STATUSES, GRADED_STATUSES, RunStatus, Status
 from .utils import natural_sort_key, slugify
@@ -51,6 +52,7 @@ class RunSummary:
     source_run: str | None = None
     incomplete_usage_cases: int | None = None
     test_coverage: dict[str, Any] = field(default_factory=dict)
+    metrics: dict[str, Any] = field(default_factory=dict)
 
     @property
     def coverage_rate(self) -> float:
@@ -173,6 +175,8 @@ def render_markdown_report(
     config: FrameworkConfig,
     results: list[dict[str, Any]],
 ) -> str:
+    if summary.task == "api_experience":
+        return render_experience(summary, config, results)
     usage = summary.token_usage
     generated_at = time.strftime("%Y-%m-%d %H:%M:%S")
     graded = sum(summary.status_counts.get(status, 0) for status in GRADED_STATUSES)
@@ -258,6 +262,26 @@ def render_markdown_report(
             lines.append(
                 "**Incomplete test coverage: the pass rate includes public-only samples and must not be "
                 "reported as a full-test benchmark score.**"
+            )
+    if summary.task == "quick40":
+        lines.extend(
+            [
+                "",
+                "### Fixed 40-case coverage sample",
+                "",
+                "Original-language questions; ten per dimension. This is not a calibrated benchmark or "
+                "a general model ranking. Each case changes its dimension count by one out of ten. "
+                "IFEval checks explicit constraints, not subjective writing quality. "
+                "Errors and cancellations are not silently counted as wrong answers.",
+                "",
+                "| Dimension | Passed / planned | Graded | Errors | Cancelled | Truncated |",
+                "| --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for name, stats in summary.metrics.get("dimensions", {}).items():
+            lines.append(
+                f"| {name} | {stats['passed']}/{stats['planned']} | {stats['graded']} | "
+                f"{stats['errors']} | {stats['cancelled']} | {stats['truncated']} |"
             )
     domain_rows = _domain_breakdown(results)
     if domain_rows:

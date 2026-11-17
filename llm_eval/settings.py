@@ -21,11 +21,13 @@ DEFAULT_DATASET_PATHS = {
     "mmlu_pro": Path("datasets/MMLUPro.jsonl"),
     "ifeval": Path("datasets/IFEval.jsonl"),
     "livecodebench": Path("datasets/LiveCodeBench.jsonl"),
+    "quick40": Path("llm_eval/suites/quick40-v1.json"),
+    "api_experience": Path("llm_eval/suites/api-experience-v1.json"),
 }
 
 NUMPY_VERSION = "2.2.6"
 NUMPY_IMAGE = "llm-eval-python:3.12-numpy2.2.6"
-PLUS_TASKS = ("humanevalplus", "mbppplus")
+PLUS_TASKS = ("humanevalplus", "mbppplus", "quick40")
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,39 @@ class RunConfig:
     reasoning_effort: str | None = None
     limit: int | None = None
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
+    max_output_tokens: int | None = None
+    output_token_parameter: str = "max_tokens"
+    temperature: float | None = None
+    seed: int | None = None
+    stall_threshold_seconds: float = 1.0
+    slo_ttft_seconds: float | None = None
+    slo_tps: float | None = None
+    slo_max_gap_seconds: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.output_token_parameter not in ("max_tokens", "max_completion_tokens"):
+            raise ValueError("output_token_parameter must be max_tokens or max_completion_tokens")
+        if self.stall_threshold_seconds is None:
+            raise ValueError("stall_threshold_seconds must be finite and positive")
+        if self.max_output_tokens is not None and (
+            type(self.max_output_tokens) is not int or self.max_output_tokens <= 0
+        ):
+            raise ValueError("max_output_tokens must be a positive integer")
+        if self.seed is not None and type(self.seed) is not int:
+            raise ValueError("seed must be an integer")
+        if self.temperature is not None and (
+            isinstance(self.temperature, bool)
+            or not isinstance(self.temperature, (int, float))
+            or not math.isfinite(self.temperature)
+            or not 0 <= self.temperature <= 2
+        ):
+            raise ValueError("temperature must be finite and between 0 and 2")
+        for name in ("stall_threshold_seconds", "slo_ttft_seconds", "slo_tps", "slo_max_gap_seconds"):
+            value = getattr(self, name)
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0
+            ):
+                raise ValueError(f"{name} must be finite and positive")
 
     @property
     def reasoning_display(self) -> str:
@@ -139,13 +174,25 @@ def load_framework_config(
 
     run = RunConfig(
         task=task_name,
-        workers=max(1, int(workers if workers is not None else model_data.get("workers", 10))),
+        workers=1
+        if task_name == "api_experience"
+        else max(
+            1, int(workers if workers is not None else (1 if task_name == "quick40" else model_data.get("workers", 10)))
+        ),
         output_dir=(root / "results" / slugify(model.model_name)).resolve(),
         execution_timeout_seconds=max(1, int(model_data.get("execution_timeout_seconds", 20))),
         thinking_enabled=parse_bool(model_data.get("thinking_enabled", False), default=False),
         reasoning_effort=_optional_text(model_data.get("reasoning_effort")),
         limit=max(1, int(limit)) if limit is not None else None,
         execution=execution,
+        max_output_tokens=model_data.get("max_output_tokens", 4096 if task_name == "quick40" else None),
+        output_token_parameter=model_data.get("output_token_parameter", "max_tokens"),
+        temperature=model_data.get("temperature"),
+        seed=model_data.get("seed"),
+        stall_threshold_seconds=model_data.get("stall_threshold_seconds", 1.0),
+        slo_ttft_seconds=model_data.get("slo_ttft_seconds"),
+        slo_tps=model_data.get("slo_tps"),
+        slo_max_gap_seconds=model_data.get("slo_max_gap_seconds"),
     )
 
     return FrameworkConfig(

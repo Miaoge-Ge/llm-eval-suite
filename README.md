@@ -321,7 +321,11 @@ Ctrl+C stops scheduling, execution, and retries, attempts to close active model 
 
 ## Development
 
-Tests do not call live model APIs. Real container tests are opt-in after preparing Docker and its image: set `LLM_EVAL_DOCKER_TESTS=1`, then run `uv run pytest tests/test_docker_integration.py`. They are skipped otherwise; mocked Docker tests are not a substitute for container validation.
+Tests do not call live model APIs. Real container tests are opt-in after preparing Docker and its image: set `LLM_EVAL_DOCKER_TESTS=1`, then run `uv run pytest tests/test_docker_integration.py tests/test_lightweight_suites.py`. They are skipped otherwise; mocked Docker tests are not a substitute for container validation.
+
+The lightweight suite tests cover fixed selection, retry-free accounting for 30 API requests, and all 40 reference answers graded in real Docker, including resume and offline regrading. API failures are injected through a mock HTTP transport.
+
+Windows sandbox temporary paths can exceed the filesystem path limit and produce `FileNotFoundError`. Use a short project-local test directory, for example `uv run pytest --basetemp .pytest_cache/run-tmp`. Reserve that directory for test scratch files: pytest clears it.
 
 All tooling is configured in `pyproject.toml` and runs through `uv`:
 

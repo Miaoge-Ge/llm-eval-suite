@@ -33,13 +33,24 @@ def digest(data: bytes) -> str:
 
 def write_atomic(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    # Keep sibling temporary names short: nested regrades can approach Windows'
+    # path-length limit even when the destination itself is writable.
+    temporary = path.with_name(f".{uuid.uuid4().hex}.tmp")
     try:
         with temporary.open("w", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
-        temporary.replace(path)
+        for attempt in range(5):
+            try:
+                temporary.replace(path)
+                break
+            except PermissionError as exc:
+                # Windows readers can briefly deny replacement of an existing file.
+                # Retry only the atomic rename, preserving the previous file on failure.
+                if getattr(exc, "winerror", None) not in (5, 32, 33) or attempt == 4:
+                    raise
+                time.sleep(0.02 * 2**attempt)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -132,6 +143,13 @@ def identity(config: FrameworkConfig, task: BaseEvaluationTask, cases: list[Task
         "task": config.run.task,
         "thinking_enabled": config.run.thinking_enabled,
         "reasoning_effort": config.run.reasoning_effort,
+        "generation_options": [task.generation_options(case) for case in cases],
+        "max_output_tokens": config.run.max_output_tokens,
+        "output_token_parameter": config.run.output_token_parameter,
+        "temperature": config.run.temperature,
+        "seed": config.run.seed,
+        "stall_threshold_seconds": config.run.stall_threshold_seconds,
+        "experience_slo": [config.run.slo_ttft_seconds, config.run.slo_tps, config.run.slo_max_gap_seconds],
         "execution": asdict(config.run.execution),
         "execution_timeout_seconds": config.run.execution_timeout_seconds,
         "dataset_sha256": digest(config.dataset.path.read_bytes()),

@@ -10,6 +10,7 @@ from httpx import TransportError
 from openai import APIConnectionError, OpenAI
 
 from .settings import FrameworkConfig
+from .stream_metrics import StreamTimeline
 
 MAX_ATTEMPTS = 3
 FATAL_ERROR_MARKERS = ("invalid api key", "authentication", "unauthorized", "incorrect api key")
@@ -46,6 +47,12 @@ def request_parameters(config: FrameworkConfig) -> dict[str, Any]:
         parameters["extra_body"] = {"thinking": {"type": "enabled"}}
         if config.run.reasoning_effort:
             parameters["reasoning_effort"] = config.run.reasoning_effort
+    if config.run.max_output_tokens is not None:
+        parameters[config.run.output_token_parameter] = config.run.max_output_tokens
+    if config.run.temperature is not None:
+        parameters["temperature"] = config.run.temperature
+    if config.run.seed is not None:
+        parameters["seed"] = config.run.seed
     return parameters
 
 
@@ -62,7 +69,16 @@ class OpenAICompatibleClient:
             max_retries=0,
         )
 
-    def generate(self, messages: list[dict[str, str]]) -> GenerationResult:
+    def generate(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        parameters: dict[str, Any] | None = None,
+        max_attempts: int = MAX_ATTEMPTS,
+        capture_timing: bool = False,
+    ) -> GenerationResult:
+        if not 1 <= max_attempts <= MAX_ATTEMPTS:
+            raise ValueError(f"max_attempts must be between 1 and {MAX_ATTEMPTS}")
         last_error = "Unknown generation error"
         last_status_code: int | None = None
         # Tokens consumed by failed attempts still count against the run.
@@ -72,7 +88,7 @@ class OpenAICompatibleClient:
         attempts = 0
         attempt_records: list[dict[str, Any]] = []
         partial_content = ""
-        for attempt in range(MAX_ATTEMPTS):
+        for attempt in range(max_attempts):
             if self.cancel_event.is_set():
                 last_error = "Generation cancelled"
                 break
@@ -87,8 +103,9 @@ class OpenAICompatibleClient:
             response_metadata: dict[str, Any] = {}
             attempt_error = None
             attempt_started = time.monotonic()
+            timeline = StreamTimeline(time.perf_counter()) if capture_timing else None
             try:
-                kwargs = {**request_parameters(self.config), "messages": messages}
+                kwargs = {**request_parameters(self.config), **(parameters or {}), "messages": messages}
 
                 raw_response = self.client.chat.completions.with_raw_response.create(**kwargs)
                 last_status_code = raw_response.status_code
@@ -100,7 +117,9 @@ class OpenAICompatibleClient:
                     try:
                         if self.cancel_event.is_set():
                             raise GenerationCancelled("Generation cancelled")
-                        content = self._consume_stream(stream, attempt_usage, parts, reasoning, response_metadata)
+                        content = self._consume_stream(
+                            stream, attempt_usage, parts, reasoning, response_metadata, timeline
+                        )
                     finally:
                         with self._streams_lock:
                             self._active_streams.remove(stream)
@@ -110,6 +129,7 @@ class OpenAICompatibleClient:
             except Exception as exc:
                 last_error = str(exc).replace(self.config.model.api_key, "[REDACTED]").replace("\n", " ")
                 attempt_error = last_error
+                response_metadata["error_type"] = type(exc).__name__
                 error_status = getattr(exc, "status_code", None)
                 last_status_code = error_status if error_status is not None else last_status_code
                 fatal = error_status in (401, 403) or (error_status is None and self._is_fatal_error(last_error))
@@ -128,6 +148,8 @@ class OpenAICompatibleClient:
                 if stream_started and not attempt_usage:
                     usage_complete = False
                 partial_content = "".join(parts)
+                if timeline is not None:
+                    response_metadata["timing"] = timeline.finish(time.perf_counter())
                 attempt_records.append(
                     {
                         "attempt": attempts,
@@ -151,7 +173,7 @@ class OpenAICompatibleClient:
                 )
             if fatal or not retryable:
                 break
-            if attempt < MAX_ATTEMPTS - 1:
+            if attempt < max_attempts - 1:
                 self.cancel_event.wait(1 + attempt)
 
         return GenerationResult(
@@ -173,6 +195,7 @@ class OpenAICompatibleClient:
         parts: list[str],
         reasoning: list[str],
         metadata: dict[str, Any],
+        timeline: StreamTimeline | None = None,
     ) -> str:
         for chunk in stream:
             if getattr(chunk, "model", None):
@@ -185,6 +208,16 @@ class OpenAICompatibleClient:
                         "total_tokens": chunk.usage.total_tokens or 0,
                     }
                 )
+                details = getattr(chunk.usage, "completion_tokens_details", None)
+                reasoning_tokens = getattr(details, "reasoning_tokens", None)
+                if type(reasoning_tokens) is int:
+                    metadata["reasoning_tokens"] = reasoning_tokens
+                prompt_details = getattr(chunk.usage, "prompt_tokens_details", None)
+                cached = getattr(prompt_details, "cached_tokens", None)
+                if cached is None:
+                    cached = getattr(chunk.usage, "prompt_cache_hit_tokens", None)
+                if type(cached) is int:
+                    metadata["cached_prompt_tokens"] = cached
             if self.cancel_event.is_set():
                 raise GenerationCancelled("Generation cancelled")
             for choice in getattr(chunk, "choices", None) or []:
@@ -199,6 +232,12 @@ class OpenAICompatibleClient:
                     parts.append(delta.content)
                 if delta and getattr(delta, "reasoning_content", None):
                     reasoning.append(delta.reasoning_content)
+                if timeline is not None and delta:
+                    timeline.observe(
+                        time.perf_counter(),
+                        getattr(delta, "content", None) or "",
+                        getattr(delta, "reasoning_content", None) or "",
+                    )
         if self.cancel_event.is_set():
             raise GenerationCancelled("Generation cancelled")
         if not metadata.get("finish_reason"):
