@@ -1,13 +1,13 @@
 # LLM Eval Suite
 
-[English](README.md) · [CLI 完整参考](docs/reference_CN.md) · [网页部署](docs/deployment.md)
+[English](README.md) · [CLI 完整参考](docs/reference_CN.md) · [网页部署](docs/deployment.md) · [CI](https://github.com/Miaoge-Ge/llm-eval-suite/actions/workflows/ci.yml)
 
 通过命令行或网页，对 OpenAI 兼容接口进行模型能力评测和 API 服务质量测试。每轮保存原始回答、有效配置、计时与评分依据。
 
 | 功能 | 状态 | 用途 |
 | --- | --- | --- |
 | Benchmark 测试 | 已实现 | 代码、数学、知识、指令遵循；标准题库，可设置题量 |
-| API 测试 | 已实现 | 首试成功率、流式延迟、中断、截断、可观测吞吐 |
+| API 测试 | 已实现 | 60 次固定请求，覆盖服务质量、流式延迟、输出检查与 tokens 消耗 |
 | 模型验证 | 待开发 | 未来与可信参考模型比较；当前不生成模型真伪结论 |
 
 ## 快速开始
@@ -30,6 +30,26 @@ PowerShell 使用 `Copy-Item` 复制文件，用 `$env:OPENAI_API_KEY = '你的�
 
 完整题库包括 HumanEval/Plus、MBPP/Plus、GSM8K、AIME 2025/2026、GPQA、MMLU-Pro、IFEval、LiveCodeBench。LiveCodeBench 私有测试需要额外下载，见 [CLI 参考](docs/reference_CN.md)。
 
+## Benchmark 题库与题量
+
+以下为仓库当前内置文件的题量，不代表所有上游题库的完整规模。网页下拉列表显示服务器实际安装的题量，选择题库或修改题量上限时，会同步显示本次计划测试数。
+
+| 题库 | CLI 任务名 | 内置题量 |
+| --- | --- | ---: |
+| HumanEval | `humaneval` | 164 |
+| HumanEval+ | `humanevalplus` | 164 |
+| MBPP | `mbpp` | 974 |
+| MBPP+ | `mbppplus` | 378 |
+| GSM8K | `gsm` | 1,319 |
+| AIME 2025 | `aime2025` | 30 |
+| AIME 2026 | `aime2026` | 30 |
+| GPQA | `gpqa` | 198 |
+| MMLU-Pro | `mmlu_pro` | 420 |
+| IFEval | `ifeval` | 541 |
+| LiveCodeBench | `livecodebench` | 219 |
+
+题量上限留空时运行当前题库全部题目；上限超过题库规模时，仅运行已有题目。这里统计的是题目数，选中的 Plus 题目仍完整执行题内扩展测试。LiveCodeBench 还需准备私有测试资产才能使用。Quick40 题包及 `quick-test` 命令已移除。
+
 ## 网页工作台
 
 [原生架构与匿名隔离](docs/native-service.md) · [并发性能与迁移验证](docs/validation-native-2026-11-17.md)
@@ -39,17 +59,33 @@ PowerShell 使用 `Copy-Item` 复制文件，用 `$env:OPENAI_API_KEY = '你的�
 ```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j2
+# 用于受保护的运维 API，网页已无管理员登录页。
 export LLM_EVAL_ADMIN_PASSWORD='设置足够长的私有访问密码'
 export LLM_EVAL_SESSION_SECRET="$(python -c 'import secrets; print(secrets.token_hex(32))')"
-# 可选：设置 DEEPSEEK_API_KEY，供默认 DeepSeek 地址使用。
+# 可选：DEEPSEEK_API_KEY 仅供已认证的运维 API 客户端使用。
 uv run --extra web llm-eval-web
 ```
 
-访问 `http://127.0.0.1:8080` 即可免注册进入。访客填写自己的 API 密钥；管理员登录后可使用服务器默认密钥。服务端签名的随机 Cookie 标识本浏览器，30 天有效，每次查询、下载、取消都校验任务归属。IP 只用于限流，同一 IP 下的不同浏览器不会共享记录。同一浏览器的多个标签页共享工作区；清 Cookie 或换浏览器后无法找回旧匿名任务。
+访问 `http://127.0.0.1:8080` 即可免注册、免登录进入，填写自己的模型 API 密钥即可评测。管理入口按钮和登录页面已删除；连接异常时提供“重新连接”。服务端签名的随机 Cookie 标识本浏览器，30 天有效，每次查询、下载、取消都校验任务归属。IP 只用于限流，同一 IP 下的不同浏览器不会共享记录。同一浏览器的多个标签页共享工作区；清 Cookie 或换浏览器后无法找回旧匿名任务。
 
 默认最多 20 个运行任务、40 个模型请求、4 个评分进程、200 个运行及排队任务；每位访客最多 2 个运行及排队任务，每任务最多 10 workers。资源共享时会排队，调度等待与 API 延迟分别记录。4 核 / 4 GB 主机不能保证 100 个 CPU 密集评测同时独占资源。密钥仅在内存中使用，不传入评分进程。公网部署使用 HTTPS。
 
 网页支持按模型联动选择思考强度，并把 `reasoning_effort` 原样发送给 OpenAI 兼容中转；`none` 请求关闭思考。预设来自指定模型清单，不能证明中转已支持或执行该参数。详见[API60 与思考强度](docs/api-testing.md)。
+
+## API60 与 tokens 消耗
+
+| 场景 | 请求数 | 观测与检查 |
+| --- | ---: | --- |
+| 短回答 | 10 | 首段延迟与请求完成情况 |
+| 长回答 | 10 | 持续输出、停顿与吞吐 |
+| 长上下文 | 10 | 约 4K 参考输入 tokens 下的响应 |
+| JSON 输出 | 10 | JSON 模式支持、对象结构与字段值 |
+| 多轮上下文 | 10 | 对修正后上下文的记忆 |
+| 中英文混合 | 10 | 中文、英文、重音字符及 emoji 精确回显 |
+
+各场景交错执行，失败请求原样保留，不自动重试或降级。输出检查独立于传输成功率。网页按场景显示成功数、首段正文 P50/P95、截断数和输出检查结果。
+
+网页结果和导出报告展示**输入、输出、总 tokens 消耗**。网页随响应返回更新，包含失败或截断请求中已知的用量。输出按上游口径包含思考 tokens，不重复加算思考或缓存 tokens。用量缺失不会补成零，部分统计会显示缺失请求数；仅在输入、输出都已知时补算总和。这些是观测到的 tokens 数量，不是费用估算。
 
 ## 评测规则
 
@@ -92,10 +128,11 @@ docs/                 # CLI、部署参考
 
 [历史迁移验证](docs/validation-native-2026-11-17.md)记录了旧版本实测；当前 API60 规则与思考强度见[配置说明](docs/api-testing.md)。
 
+普通 CI 包括 Linux/Windows 回归、网页交互逻辑、Ruff、mypy、真实 Docker、C++ Release 构建及原生 HTTP 权限/失败统计测试，不调用模型。手动运行 **DeepSeek live evaluation** 工作流时，从 Secret `DEEPSEEK_API_KEY` 读取密钥，通过 C++ 生产服务先跑 60 次 API 测试，再跑所选标准题库（默认 GSM8K 10 题），两者均为 **10 workers**。
 
-普通 CI 包括 Linux/Windows 回归、Ruff、mypy、真实 Docker、C++ Release 构建及原生 HTTP 权限/失败统计测试，不调用模型。手动运行 **DeepSeek live evaluation** 工作流时，从 Secret `DEEPSEEK_API_KEY` 读取密钥，通过 C++ 生产服务先跑 60 次 API 测试，再跑所选标准题库（默认 GSM8K 10 题），两者均为 **10 workers**。
+DeepSeek 配置显式启用思考，思考与正文共享 **16,384 token** 输出预算。横向对比应使用相同题包、并发数、思考设置和输出预算；计时反映运行机器的网络条件。
 
-DeepSeek 配置显式启用思考，思考与正文共享 **16,384 token** 输出预算。首轮实测因预算过小，在思考阶段耗尽额度，失败记录保留在 Actions 中。增加预算不改变原题及要求回答的长度；横向对比需要使用同一设置。计时反映运行机器的网络条件。
+[2026-11-17 的真实测试](https://github.com/Miaoge-Ge/llm-eval-suite/actions/runs/44046356695)完成 **60/60 次 API 请求**、**30/30 项输出检查**，无截断、无额外尝试。用量为**输入 44,782 + 输出 39,432 = 总计 84,214 tokens**。这仅是 `deepseek-flash` 的单轮观测，不代表所有思考强度预设已实测，也不代表长期可用率。
 
 ```bash
 uv sync --frozen --extra dev --extra web
