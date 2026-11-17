@@ -308,6 +308,45 @@ def test_parallel_jobs_observe_global_request_and_grader_limits(service, provide
     assert capacity["graders"]["peak"] <= 2
 
 
+def test_hard_restart_preserves_in_flight_request_accounting(service, provider, tmp_path):
+    base, admin, state, process = service
+    url, mock = provider
+    mock.mode = "slow"
+    identifier = submit(admin, url)
+    for _ in range(100):
+        if mock.count:
+            break
+        time.sleep(0.02)
+    assert mock.count > 0
+    environment = dict(
+        item.decode().split("=", 1) for item in Path(f"/proc/{process.pid}/environ").read_bytes().split(b"\0") if item
+    )
+    process.kill()
+    process.wait(timeout=10)
+    pending = list((state / "jobs" / identifier).glob("runs/*/*/native_pending/*.json"))
+    assert len(pending) >= mock.count
+    with (tmp_path / "restarted.log").open("w") as log:
+        restarted = subprocess.Popen(process.args, env=environment, stdout=log, stderr=log)
+        try:
+            with httpx.Client(base_url=base, timeout=10) as client:
+                for _ in range(100):
+                    try:
+                        response = client.post("/api/login", json={"password": "native-test-password"})
+                        if response.status_code == 200:
+                            break
+                    except httpx.TransportError:
+                        pass
+                    time.sleep(0.05)
+                row = client.get(f"/api/jobs/{identifier}").json()
+                assert row["status"] == "INTERRUPTED", row
+                assert row["summary"]["api_attempts"] == len(pending)
+                assert row["summary"]["incomplete_usage_cases"] == len(pending)
+                assert row["summary"]["metrics"]["overall"]["attempted"] == len(pending)
+        finally:
+            restarted.terminate()
+            restarted.wait(timeout=40)
+
+
 @pytest.mark.skipif(
     os.getenv("LLM_EVAL_DOCKER_TESTS") != "1"
     or not (repo_root() / "datasets/benchmark/LiveCodeBench.private").is_dir(),

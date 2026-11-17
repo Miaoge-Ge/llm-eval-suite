@@ -194,7 +194,8 @@ Json StreamDecoder::record() const {
 }
 Json generate(const Endpoint& target, const std::string& key, const Json& request,
               bool public_only, int timeout_seconds, std::atomic<bool>& cancelled,
-              int concurrency, int shared_limit, double scheduler_wait) {
+              int concurrency, int shared_limit, double scheduler_wait,
+              const std::function<void(const Json&)>& journal) {
     const bool timing = request.value("capture_timing", false);
     const int max_attempts = std::clamp(request.value("max_attempts", 3), 1, 3);
     Json records = Json::array();
@@ -203,6 +204,22 @@ Json generate(const Endpoint& target, const std::string& key, const Json& reques
     std::string last_error = "Generation cancelled", partial;
     long last_status = 0;
     for (int attempt = 1; attempt <= max_attempts && !cancelled; ++attempt) {
+        if (journal) {
+            auto unfinished = records;
+            Json marker = {{"attempt", attempt}, {"error", "Request interrupted before its outcome was saved"},
+                           {"error_type", "GenerationCancelled"}, {"usage", Json::object()},
+                           {"delivery_confirmed", false}, {"http_status_code", nullptr}};
+            if (timing) {
+                marker["timing"] = {{"events", Json::array()}};
+                marker["request_concurrency"] = concurrency;
+                marker["shared_request_limit"] = shared_limit;
+                marker["scheduler_wait_seconds"] = scheduler_wait;
+            }
+            unfinished.push_back(std::move(marker));
+            journal({{"content", partial}, {"usage", total}, {"error", "Request outcome unknown after interruption"},
+                     {"fatal", false}, {"http_status_code", nullptr}, {"attempts", attempt},
+                     {"usage_complete", false}, {"cancelled", true}, {"attempt_records", unfinished}});
+        }
         last_status = 0;
         Transfer transfer(timing, cancelled);
         const auto started = Clock::now();

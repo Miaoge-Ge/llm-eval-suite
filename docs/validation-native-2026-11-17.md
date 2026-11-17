@@ -10,6 +10,7 @@ The production web service now uses C++20 for HTTP, anonymous sessions, scheduli
 - **Full scoring:** all 40 reference answers passed through the native HTTP path and real Docker, including complete Plus tests. Offline scoring preserved results without model calls. All 219 LiveCodeBench private asset hashes matched; its first problem passed public and private tests on the server.
 - **Failures:** simulated rate limits and incomplete streams still produced exactly 30 attempts for API30. Reasoning-only length truncations were not retried, missing TPS stayed missing, benchmark retries retained both attempts, and scorer interruption recovery retained recorded usage.
 - **Isolation/recovery:** checked same-IP guest separation, ownership after restart, tampered cookies, cross-origin requests, guest access to default keys, credential-free scorer environments, cancellation, interrupted jobs and global request/scorer limits.
+- **Hard termination:** a request-start journal retains in-flight attempts across SIGKILL/restart. Interrupted delivery is marked unconfirmed with missing usage; API reports retain the attempt instead of silently counting zero. This boundary has a dedicated real-process restart test.
 
 Guest identity is a random signed browser cookie, not an IP address. Different profiles behind one IP are separate; tabs in one profile share a workspace. Clearing the cookie loses access to previous anonymous tasks. See [native architecture](native-service.md).
 

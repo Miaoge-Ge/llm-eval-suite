@@ -203,6 +203,11 @@ def finish(root: Path, data: dict[str, Any]) -> dict[str, Any]:
             )
             if saved:
                 result.metadata["generation_id"] = saved["generation_id"]
+                generation = GenerationResult(**saved["generation"])
+                if generation.error:
+                    result = task._api_error_result(case, time.time(), generation)
+                    result.case_index = index
+                    result.metadata["generation_id"] = saved["generation_id"]
             result.metadata.update(task.case_metadata(case))
             rows[index] = result.to_dict()
             write_json(root / "cases" / f"{index:08d}.json", rows[index])

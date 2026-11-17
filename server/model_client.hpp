@@ -34,5 +34,6 @@ private:
 
 Json generate(const Endpoint& target, const std::string& key, const Json& request,
               bool public_only, int timeout_seconds, std::atomic<bool>& cancelled,
-              int concurrency, int shared_limit, double scheduler_wait);
+              int concurrency, int shared_limit, double scheduler_wait,
+              const std::function<void(const Json&)>& journal = {});
 }

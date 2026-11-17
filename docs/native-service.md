@@ -31,6 +31,8 @@ The C++ HTTP backend closes each internal response connection so idle Caddy conn
 
 Model responses are saved before scoring. A failed scorer cannot silently remove recorded attempts or usage. Finalization recovers ungraded response records without issuing another model request. API tests allow one attempt per case; benchmark retries preserve every attempt. Scheduler waiting time is separate from measured API latency. Missing usage or an unmeasurable body generation window leaves TPS unavailable.
 
+Each attempt also writes a start record before entering the HTTP transfer. A hard process crash therefore preserves an attempt with an unknown outcome and incomplete usage; delivery to the provider is explicitly unconfirmed. It is not silently counted as an unsent task or automatically reissued.
+
 Shutdown cancels queued and running work. Restart marks unfinished jobs interrupted and recovers saved accounting. Docker containers are labelled by service, scorer and job; stale containers are cleaned within that ownership scope. API tests cannot resume across time periods. Both test modes support offline grading with the existing CLI.
 
 ## Verification

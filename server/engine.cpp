@@ -290,11 +290,17 @@ void Engine::run(const std::shared_ptr<Job>& job) {
         while (!pending.empty() || (!job->cancelled && next < requests.size())) {
             while (!job->cancelled && next < requests.size() && pending.size() < job->spec["workers"].get<std::size_t>()) {
                 const auto request = requests[next]; const auto queued = Clock::now();
-                auto future = requests_->submit([this, job, request, queued] {
+                const auto index = next;
+                auto future = requests_->submit([this, job, request, queued, index] {
                     ActivityGuard activity(request_activity_);
                     const auto target = endpoint(job->spec["base_url"], job->owner != "admin");
                     return generate(target, job->key, request, job->owner != "admin", 120, job->cancelled,
-                                    job->spec["workers"], config_.requests, elapsed(queued));
+                                    job->spec["workers"], config_.requests, elapsed(queued),
+                                    [job, request, index, queued](const Json& generation) {
+                                        write_json(job->run / "native_pending" / (std::to_string(index) + ".json"),
+                                            {{"index", index}, {"request", request["body"]}, {"generation", generation},
+                                             {"duration_seconds", elapsed(queued)}});
+                                    });
                 });
                 pending.push_back({next++, request, std::move(future), false, queued});
             }
