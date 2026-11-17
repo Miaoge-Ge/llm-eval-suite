@@ -21,18 +21,24 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
-from datasets import load_dataset
+from llm_eval.artifacts import write_atomic
+from llm_eval.livecodebench import LCB_REPO, LCB_REVISION, normalize_problem
 
 DATASETS_DIR = Path(__file__).resolve().parent.parent / "datasets"
 
 
+def load_dataset(*args: Any, **kwargs: Any) -> Any:
+    # LiveCodeBench's raw JSONL importer does not need the datasets package.
+    from datasets import load_dataset as hf_load_dataset
+
+    return hf_load_dataset(*args, **kwargs)
+
+
 def _write_jsonl(filename: str, rows: Iterable[dict[str, Any]]) -> None:
     path = DATASETS_DIR / filename
-    count = 0
-    with path.open("w", encoding="utf-8") as handle:
-        for row in rows:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-            count += 1
+    records = [json.dumps(row, ensure_ascii=False) + "\n" for row in rows]
+    write_atomic(path, "".join(records))
+    count = len(records)
     print(f"wrote {count} rows -> {path.relative_to(DATASETS_DIR.parent)}")
 
 
@@ -89,32 +95,22 @@ def build_ifeval() -> None:
     _write_jsonl("IFEval.jsonl", rows)
 
 
-def build_livecodebench() -> None:
-    # code_generation_lite ships a (now-unsupported) loading script, so we read
-    # the raw test.jsonl directly. Only stdin/stdout problems are kept, using the
-    # plaintext public test cases (private cases are large base64+zlib blobs).
-    from huggingface_hub import hf_hub_download
+def build_livecodebench(source: Path | None = None, revision: str = LCB_REVISION) -> None:
+    if source is None:
+        from huggingface_hub import hf_hub_download
 
-    path = hf_hub_download("livecodebench/code_generation_lite", "test.jsonl", repo_type="dataset")
+        source = Path(hf_hub_download(LCB_REPO, "test.jsonl", repo_type="dataset", revision=revision))
     rows: list[dict[str, Any]] = []
-    with open(path, encoding="utf-8") as handle:
+    with source.open(encoding="utf-8") as handle:
         for line in handle:
             if not line.strip():
                 continue
             record = json.loads(line)
-            public = json.loads(record["public_test_cases"])
-            if not public or any(case.get("testtype") != "stdin" for case in public):
-                continue
-            rows.append(
-                {
-                    "question_id": record["question_id"],
-                    "title": record["question_title"],
-                    "platform": record["platform"],
-                    "difficulty": record["difficulty"],
-                    "problem": record["question_content"],
-                    "tests": [{"input": case["input"], "output": case["output"]} for case in public],
-                }
-            )
+            normalized = normalize_problem(record, DATASETS_DIR, revision)
+            if normalized is not None:
+                rows.append(normalized)
+    if len({row["question_id"] for row in rows}) != len(rows):
+        raise ValueError("Duplicate LiveCodeBench problem IDs")
     _write_jsonl("LiveCodeBench.jsonl", rows)
 
 
@@ -168,7 +164,15 @@ BUILDERS: dict[str, Callable[[], None]] = {
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("target", choices=[*BUILDERS, "all"], help="dataset to fetch")
+    parser.add_argument("--source", type=Path, help="Local upstream LiveCodeBench test.jsonl")
+    parser.add_argument("--revision", default=LCB_REVISION, help="LiveCodeBench dataset revision")
     args = parser.parse_args()
+
+    if args.target == "livecodebench":
+        build_livecodebench(args.source, args.revision)
+        return
+    if args.source:
+        parser.error("--source is only supported for livecodebench")
 
     targets = BUILDERS.values() if args.target == "all" else [BUILDERS[args.target]]
     for builder in targets:
